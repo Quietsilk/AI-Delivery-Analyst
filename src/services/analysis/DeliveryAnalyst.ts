@@ -45,6 +45,13 @@ export class DeliveryAnalyst {
 
     if (!response.ok) {
       const body = await response.text();
+
+      // Gracefully skip AI on quota/billing errors — still deliver the report
+      if (response.status === 429 || response.status === 402) {
+        console.warn(`OpenAI quota exceeded (${response.status}). Skipping AI analysis.`);
+        return "AI analysis skipped: OpenAI quota exceeded. Top up your account at platform.openai.com.";
+      }
+
       throw new Error(
         `OpenAI analysis failed with status ${response.status}: ${body.slice(0, 500)}`
       );
