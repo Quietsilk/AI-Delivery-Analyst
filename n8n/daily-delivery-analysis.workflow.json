@@ -1,0 +1,33 @@
+{
+  "name": "Daily Delivery Analysis",
+  "meta": {
+    "description": "MVP workflow placeholder for Jira -> metrics -> AI -> Slack/Telegram pipeline"
+  },
+  "nodes": [
+    {
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron"
+    },
+    {
+      "name": "Fetch Jira Issues",
+      "type": "n8n-nodes-base.httpRequest"
+    },
+    {
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.code"
+    },
+    {
+      "name": "Compute Metrics",
+      "type": "n8n-nodes-base.code"
+    },
+    {
+      "name": "Analyze With AI",
+      "type": "n8n-nodes-base.httpRequest"
+    },
+    {
+      "name": "Send Report",
+      "type": "n8n-nodes-base.httpRequest"
+    }
+  ],
+  "connections": {}
+}
