@@ -1,5 +1,6 @@
 import { AppConfig } from "../../config/env.js";
 import { Issue } from "../../domain/entities/Issue.js";
+import { SourceMetrics } from "../../domain/metrics/SourceMetrics.js";
 import { DeliveryMetrics } from "../../domain/metrics/types.js";
 import { buildPrompt } from "./buildPrompt.js";
 
@@ -10,8 +11,12 @@ interface OpenAiResponsesApiResult {
 export class DeliveryAnalyst {
   constructor(private readonly config: AppConfig) {}
 
-  async analyze(metrics: DeliveryMetrics, issues: Issue[]): Promise<string> {
-    const prompt = buildPrompt(metrics, issues);
+  async analyze(
+    metrics: DeliveryMetrics,
+    issues: Issue[],
+    sources: SourceMetrics[]
+  ): Promise<string> {
+    const prompt = buildPrompt(metrics, issues, sources);
 
     if (!this.config.openAiApiKey) {
       return [

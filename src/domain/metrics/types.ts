@@ -3,4 +3,7 @@ export interface DeliveryMetrics {
   leadTimeHours: number;
   throughput: number;
   predictability: number;
+  backlogSize: number;
+  inProgressCount: number;
+  completedCount: number;
 }

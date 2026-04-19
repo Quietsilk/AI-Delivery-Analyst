@@ -1,15 +1,25 @@
-import { AppConfig } from "../../config/env.js";
+import { AppConfig, JiraSourceConfig } from "../../config/env.js";
 import { Issue } from "../../domain/entities/Issue.js";
 import { mapJiraIssue } from "./mapIssue.js";
 import { JiraSearchResponse } from "./types.js";
 
 export class JiraClient {
-  constructor(private readonly config: AppConfig) {}
+  constructor(
+    private readonly config: AppConfig,
+    private readonly source: JiraSourceConfig
+  ) {}
 
   async fetchIssues(): Promise<Issue[]> {
     const rawIssues = await this.fetchAllIssues();
 
-    return rawIssues.map((issue) => mapJiraIssue(issue, this.config));
+    return rawIssues.map((issue) =>
+      mapJiraIssue(issue, {
+        ...this.config,
+        jiraProjectKey: this.source.projectKey,
+        jiraJql: this.source.jql,
+        jiraStartedStatuses: this.source.startedStatuses
+      })
+    );
   }
 
   private async fetchAllIssues(): Promise<JiraSearchResponse["issues"]> {
@@ -31,7 +41,7 @@ export class JiraClient {
 
   private async fetchIssuesPage(startAt: number): Promise<JiraSearchResponse> {
     const url = new URL("/rest/api/3/search/jql", this.config.jiraBaseUrl);
-    url.searchParams.set("jql", this.config.jiraJql);
+    url.searchParams.set("jql", this.source.jql);
     url.searchParams.set("startAt", String(startAt));
     url.searchParams.set("maxResults", String(this.config.jiraPageSize));
     url.searchParams.set(

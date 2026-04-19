@@ -1,3 +1,13 @@
+export type DeliveryMethodology = "scrum" | "kanban";
+
+export interface JiraSourceConfig {
+  key: string;
+  projectKey: string;
+  methodology: DeliveryMethodology;
+  jql: string;
+  startedStatuses: string[];
+}
+
 export interface AppConfig {
   jiraBaseUrl: string;
   jiraEmail: string;
@@ -5,6 +15,7 @@ export interface AppConfig {
   jiraProjectKey: string;
   jiraJql: string;
   jiraStartedStatuses: string[];
+  jiraSources: JiraSourceConfig[];
   jiraStoryPointsField: string;
   jiraOriginalEstimateField: string;
   jiraPageSize: number;
@@ -62,21 +73,81 @@ function getReasoningEffortEnv(
   return fallback;
 }
 
+function parseJiraSources(
+  value: string,
+  fallbackProjectKey: string,
+  fallbackJql: string,
+  fallbackStartedStatuses: string[]
+): JiraSourceConfig[] {
+  if (!value.trim()) {
+    return [
+      {
+        key: fallbackProjectKey || "default",
+        projectKey: fallbackProjectKey,
+        methodology: "kanban",
+        jql: fallbackJql,
+        startedStatuses: fallbackStartedStatuses
+      }
+    ];
+  }
+
+  return value
+    .split(";")
+    .map((source) => source.trim())
+    .filter(Boolean)
+    .map((source) => {
+      const [keyPart, methodologyPart, projectKeyPart, jqlPart, statusesPart] =
+        source.split("|").map((part) => part.trim());
+
+      const projectKey = projectKeyPart || keyPart;
+      const methodology = normalizeMethodology(methodologyPart);
+      const startedStatuses =
+        statusesPart && statusesPart.length > 0
+          ? statusesPart.split(",").map((status) => status.trim()).filter(Boolean)
+          : fallbackStartedStatuses;
+
+      return {
+        key: keyPart || projectKey || "default",
+        projectKey,
+        methodology,
+        jql:
+          jqlPart && jqlPart.length > 0
+            ? jqlPart
+            : projectKey
+              ? `project = "${projectKey}" ORDER BY updated DESC`
+              : fallbackJql,
+        startedStatuses
+      };
+    });
+}
+
+function normalizeMethodology(value: string | undefined): DeliveryMethodology {
+  return value === "scrum" ? "scrum" : "kanban";
+}
+
 export function loadConfig(): AppConfig {
   const jiraProjectKey = getEnv("JIRA_PROJECT_KEY");
+  const jiraJql = getEnv(
+    "JIRA_JQL",
+    jiraProjectKey
+      ? `project = "${jiraProjectKey}" ORDER BY updated DESC`
+      : "ORDER BY updated DESC"
+  );
+  const jiraStartedStatuses = getListEnv("JIRA_STARTED_STATUSES", ["In Progress"]);
 
   return {
     jiraBaseUrl: getEnv("JIRA_BASE_URL"),
     jiraEmail: getEnv("JIRA_EMAIL"),
     jiraApiToken: getEnv("JIRA_API_TOKEN"),
     jiraProjectKey,
-    jiraJql: getEnv(
-      "JIRA_JQL",
-      jiraProjectKey
-        ? `project = "${jiraProjectKey}" ORDER BY updated DESC`
-        : "ORDER BY updated DESC"
+    jiraJql,
+    jiraStartedStatuses,
+    jiraSources: parseJiraSources(
+      getEnv("JIRA_SOURCES"),
+      jiraProjectKey,
+      jiraJql,
+      jiraStartedStatuses
     ),
-    jiraStartedStatuses: getListEnv("JIRA_STARTED_STATUSES", ["In Progress"]),
     jiraStoryPointsField: getEnv("JIRA_STORY_POINTS_FIELD", "customfield_10016"),
     jiraOriginalEstimateField: getEnv(
       "JIRA_ORIGINAL_ESTIMATE_FIELD",

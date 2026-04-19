@@ -21,80 +21,91 @@ interface JiraSearchResponse {
 async function main(): Promise<void> {
   loadDotEnv();
   const config = loadConfig();
+  const requestedSourceKey = process.argv[2];
+  const sources = requestedSourceKey
+    ? config.jiraSources.filter((source) => source.key === requestedSourceKey)
+    : config.jiraSources;
 
   assertRequired(config.jiraBaseUrl, "JIRA_BASE_URL");
   assertRequired(config.jiraEmail, "JIRA_EMAIL");
   assertRequired(config.jiraApiToken, "JIRA_API_TOKEN");
-  assertRequired(config.jiraJql, "JIRA_JQL");
-
-  const url = new URL("/rest/api/3/search/jql", config.jiraBaseUrl);
-  url.searchParams.set("jql", config.jiraJql);
-  url.searchParams.set("startAt", "0");
-  url.searchParams.set("maxResults", "3");
-  url.searchParams.set("fields", "*all");
-  url.searchParams.set("expand", "changelog");
-
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      "Accept": "application/json",
-      "Authorization": `Basic ${Buffer.from(
-        `${config.jiraEmail}:${config.jiraApiToken}`
-      ).toString("base64")}`
-    }
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `Jira inspect failed with status ${response.status}: ${body.slice(0, 1000)}`
-    );
+  if (sources.length === 0) {
+    throw new Error(`No Jira source matched the requested key: ${requestedSourceKey}`);
   }
 
-  const payload = (await response.json()) as JiraSearchResponse;
-  const issues = payload.issues ?? [];
+  for (const source of sources) {
+    const url = new URL("/rest/api/3/search/jql", config.jiraBaseUrl);
+    url.searchParams.set("jql", source.jql);
+    url.searchParams.set("startAt", "0");
+    url.searchParams.set("maxResults", "3");
+    url.searchParams.set("fields", "*all");
+    url.searchParams.set("expand", "changelog");
 
-  console.log(`Fetched ${issues.length} issues for inspection.`);
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+        "Authorization": `Basic ${Buffer.from(
+          `${config.jiraEmail}:${config.jiraApiToken}`
+        ).toString("base64")}`
+      }
+    });
 
-  for (const issue of issues) {
-    const fieldKeys = Object.keys(issue.fields).sort();
-    const statusTransitions =
-      issue.changelog?.histories
-        ?.flatMap((history) =>
-          history.items
-            .filter((item) => item.field.toLowerCase() === "status")
-            .map(
-              (item) =>
-                `${history.created}: ${item.fromString ?? "null"} -> ${item.toString ?? "null"}`
-            )
-        )
-        .slice(0, 10) ?? [];
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `Jira inspect failed for source ${source.key} with status ${response.status}: ${body.slice(0, 1000)}`
+      );
+    }
+
+    const payload = (await response.json()) as JiraSearchResponse;
+    const issues = payload.issues ?? [];
 
     console.log("");
-    console.log(`Issue: ${issue.key}`);
-    console.log(`Field keys (${fieldKeys.length}): ${fieldKeys.join(", ")}`);
     console.log(
-      `Known candidate values: ${JSON.stringify(
-        {
-          status: getNestedString(issue.fields, ["status", "name"]),
-          issueType: getNestedString(issue.fields, ["issuetype", "name"]),
-          assignee: getNestedString(issue.fields, ["assignee", "displayName"]),
-          created: getString(issue.fields.created),
-          resolutiondate: getString(issue.fields.resolutiondate),
-          statuscategorychangedate: getString(issue.fields.statuscategorychangedate),
-          timeoriginalestimate: issue.fields.timeoriginalestimate,
-          customfield_10016: issue.fields.customfield_10016,
-          customfield_10038: issue.fields.customfield_10038
-        },
-        null,
-        2
-      )}`
+      `Source ${source.key} (${source.methodology}, project=${source.projectKey}) fetched ${issues.length} issues for inspection.`
     );
-    console.log(
-      `Status transitions: ${
-        statusTransitions.length > 0 ? statusTransitions.join(" | ") : "none"
-      }`
-    );
+
+    for (const issue of issues) {
+      const fieldKeys = Object.keys(issue.fields).sort();
+      const statusTransitions =
+        issue.changelog?.histories
+          ?.flatMap((history) =>
+            history.items
+              .filter((item) => item.field.toLowerCase() === "status")
+              .map(
+                (item) =>
+                  `${history.created}: ${item.fromString ?? "null"} -> ${item.toString ?? "null"}`
+              )
+          )
+          .slice(0, 10) ?? [];
+
+      console.log("");
+      console.log(`Issue: ${issue.key}`);
+      console.log(`Field keys (${fieldKeys.length}): ${fieldKeys.join(", ")}`);
+      console.log(
+        `Known candidate values: ${JSON.stringify(
+          {
+            status: getNestedString(issue.fields, ["status", "name"]),
+            issueType: getNestedString(issue.fields, ["issuetype", "name"]),
+            assignee: getNestedString(issue.fields, ["assignee", "displayName"]),
+            created: getString(issue.fields.created),
+            resolutiondate: getString(issue.fields.resolutiondate),
+            statuscategorychangedate: getString(issue.fields.statuscategorychangedate),
+            timeoriginalestimate: issue.fields.timeoriginalestimate,
+            customfield_10016: issue.fields.customfield_10016,
+            customfield_10038: issue.fields.customfield_10038
+          },
+          null,
+          2
+        )}`
+      );
+      console.log(
+        `Status transitions: ${
+          statusTransitions.length > 0 ? statusTransitions.join(" | ") : "none"
+        }`
+      );
+    }
   }
 }
 
