@@ -67,7 +67,10 @@ test("mapJiraIssue normalizes jira search issue into domain issue", () => {
       openAiBaseUrl: "https://api.openai.com/v1",
       openAiModel: "gpt-5-mini",
       openAiReasoningEffort: "medium",
-      reportChannel: "telegram"
+      reportChannel: "telegram",
+      telegramBotToken: "test-token",
+      telegramChatId: "123456",
+      slackWebhookUrl: ""
     }
   );
 

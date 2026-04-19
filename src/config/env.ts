@@ -24,6 +24,9 @@ export interface AppConfig {
   openAiModel: string;
   openAiReasoningEffort: "none" | "low" | "medium" | "high" | "xhigh";
   reportChannel: "telegram" | "slack";
+  telegramBotToken: string;
+  telegramChatId: string;
+  slackWebhookUrl: string;
 }
 
 function getEnv(name: string, fallback = ""): string {
@@ -161,6 +164,9 @@ export function loadConfig(): AppConfig {
       "OPENAI_REASONING_EFFORT",
       "medium"
     ),
-    reportChannel: (getEnv("REPORT_CHANNEL", "telegram") as "telegram" | "slack")
+    reportChannel: (getEnv("REPORT_CHANNEL", "telegram") as "telegram" | "slack"),
+    telegramBotToken: getEnv("TELEGRAM_BOT_TOKEN"),
+    telegramChatId: getEnv("TELEGRAM_CHAT_ID"),
+    slackWebhookUrl: getEnv("SLACK_WEBHOOK_URL")
   };
 }
