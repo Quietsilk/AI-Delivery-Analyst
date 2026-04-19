@@ -1,105 +1,72 @@
 # AI Delivery Analyst
 
-Базовый каркас проекта под MVP из ТЗ: сбор Jira-данных, расчёт delivery-метрик, AI-анализ и отправка отчёта.
+Automated delivery analytics: pulls Jira data, calculates engineering metrics, and generates actionable reports via AI.
 
-## What This Project Demonstrates
+---
 
-Этот репозиторий можно показывать как практический пример delivery automation в IT:
+## What It Does
 
-- интеграция с Jira Cloud API для получения delivery-данных
-- нормализация сырых Jira issues в доменную модель
-- расчёт delivery metrics по нескольким delivery contexts
-- поддержка разных методологий: `kanban` и `scrum`
-- подготовка AI-ready контекста для автоматического delivery-анализа
-- архитектурное мышление: разделение на ingestion, metrics, analysis и reporting layers
+- Fetches issues from one or multiple Jira projects (kanban + scrum)
+- Calculates Cycle Time, Lead Time, Throughput, and Predictability per source and in aggregate
+- For scrum: enriches metrics with active sprint data via Jira Agile API
+- Builds a structured delivery snapshot and sends it to OpenAI Responses API
+- Formats and publishes an actionable report
 
-## Why It Is Valuable For A Resume
+## Stack
 
-Проект показывает не только умение писать код, но и умение:
-
-- переводить delivery-потребность в техническую архитектуру
-- проектировать automation вокруг Jira и delivery-процессов
-- работать с реальными API, конфигурируемыми источниками и operational risks
-- строить систему, которую можно развивать в сторону отчётности, AI insights и workflow automation
+TypeScript · Node.js 20 · Jira Cloud REST API · Jira Agile API · OpenAI Responses API (o4-mini)
 
 ## Project Structure
 
-- `src/app` — orchestration и use-case слой
-- `src/config` — конфигурация окружения
-- `src/domain` — сущности и доменная логика
-- `src/services/jira` — клиент Jira и маппинг данных
-- `src/services/analysis` — подготовка AI prompt и анализ
-- `src/services/reporting` — форматирование и доставка отчётов
-- `src/workflows` — сценарий полного daily-run
-- `n8n` — заготовки workflow под автоматизацию
-- `docs` — архитектурные и продуктовые заметки
-- `tests` — место для unit/integration тестов
+```
+src/
+  config/       — environment configuration
+  domain/       — Issue entity, metrics calculation
+  services/
+    jira/       — Jira client, data mapping, sprint insights
+    analysis/   — prompt builder, OpenAI integration
+    reporting/  — report formatter and publisher
+  workflows/    — daily analysis orchestration
+  scripts/      — dry-run, Jira simulation, inspection tools
+```
 
-## Suggested Next Steps
+## Quick Start
 
-1. Подключить реальные environment variables и секреты.
-2. Уточнить кастомные Jira fields для story points и start status transitions.
-3. Добавить расчёт cycle time, lead time, throughput и predictability по выбранному периоду.
-4. Подключить LLM provider и каналы доставки отчётов.
-5. Перенести бизнес-флоу в n8n или использовать его как orchestrator над сервисом.
+```bash
+cp .env.example .env
+# fill in JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_SOURCES, OPENAI_API_KEY
 
-## Current Vertical Slice
+npm install
+npm run dev
+```
 
-Сейчас проект уже покрывает минимальный сценарий:
+To test without network calls:
+```bash
+node --loader ts-node/esm src/scripts/dryRun.ts
+```
 
-1. Берёт задачи из одного или нескольких Jira sources.
-2. Нормализует их в доменную модель `Issue`.
-3. Считает базовые delivery metrics по каждому source и в aggregate.
-4. Передаёт delivery snapshot с учётом `scrum`/`kanban` контекста в OpenAI Responses API.
-5. Формирует текстовый отчёт и публикует его в stdout.
+## Configuration
 
-## Current Delivery Model
+Multi-project sources via `JIRA_SOURCES`:
 
-- `kanban` sources интерпретируются как flow-oriented contexts с акцентом на `backlog`, `in progress`, `throughput`, `lead time`, `cycle time`
-- `scrum` sources уже учитываются на уровне архитектуры и отчётности
-- для `scrum` подключён Jira Agile API enrichment
-- если у scrum board есть active sprint, `predictability` считается как `completed committed / committed`
-- если active sprint ещё не запущен, система явно сообщает, что использует временный scope-based proxy
+```
+kanban|kanban|KAN|project = "KAN" ORDER BY updated DESC|In Progress;scrum|scrum|SCRUM|project = "SCRUM" ORDER BY updated DESC|In Progress
+```
 
-## Multi-Project Delivery Sources
+Format: `key|methodology|projectKey|jql|startedStatuses`
 
-Для архитектурной поддержки разных методологий используется `JIRA_SOURCES`.
+If `JIRA_SOURCES` is not set, falls back to `JIRA_PROJECT_KEY` + `JIRA_JQL`.
 
-Формат:
+If `OPENAI_API_KEY` is not set, the report is generated without AI analysis.
 
-`sourceKey|methodology|projectKey|jql|startedStatus1,startedStatus2;sourceKey2|methodology|projectKey|jql|startedStatus`
+---
 
-Пример:
+## RU — О проекте
 
-`kanban|kanban|KAN|project = "KAN" ORDER BY updated DESC|In Progress;scrum|scrum|SCRUM|project = "SCRUM" ORDER BY updated DESC|In Progress`
+Система автоматического анализа delivery-метрик на основе данных из Jira.
 
-Если `JIRA_SOURCES` не задан, используется одиночный source из `JIRA_PROJECT_KEY` и `JIRA_JQL`.
+Забирает задачи из одного или нескольких Jira-проектов, считает Cycle Time, Lead Time, Throughput и Predictability отдельно для kanban и scrum, строит структурированный delivery snapshot и отправляет его в OpenAI для генерации actionable отчёта.
 
-## Jira Simulation
+**Для scrum** — predictability считается от commitment активного спринта через Jira Agile API, а не от raw scope.
 
-Для проверки системы на псевдо-спринтах и flow-сценариях можно запускать симуляцию Jira-работы:
-
-- `npm run jira:simulate` — прогоняет сценарии для всех источников
-- `npm run jira:simulate kanban` — только kanban sources
-- `npm run jira:simulate scrum` — только scrum sources
-
-Симулятор:
-
-- создаёт тестовые задачи в Jira
-- двигает их по статусам
-- оставляет часть задач незавершёнными
-- формирует более реалистичный датасет для проверки метрик и отчётов
-
-Это полезно и для разработки, и для демонстрации проекта как portfolio piece.
-
-## OpenAI Notes
-
-- По умолчанию analysis-слой использует `Responses API`.
-- Модель и reasoning effort задаются через `OPENAI_MODEL` и `OPENAI_REASONING_EFFORT`.
-- Если `OPENAI_API_KEY` не задан, отчёт всё равно соберётся, но AI-анализ будет пропущен.
-
-## Suggested Portfolio Positioning
-
-Если использовать репозиторий в резюме или LinkedIn, его можно описывать как:
-
-`Built an AI-assisted delivery analytics prototype that pulls Jira data, calculates multi-project delivery metrics, distinguishes scrum vs kanban delivery contexts, and prepares actionable reporting for engineering leadership.`
+Проект демонстрирует: интеграцию с реальными API, доменное моделирование, разделение на слои (ingestion → metrics → analysis → reporting), и практическое применение LLM в delivery-автоматизации.
