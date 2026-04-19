@@ -1,116 +1,218 @@
 # AI Delivery Analyst
 
-> Automated delivery intelligence: pulls real Jira data, calculates engineering metrics, and delivers AI-generated insights to Telegram — without manual work.
-
-Built to demonstrate a systems approach to delivery management: layered architecture, real API integrations, and production-ready automation thinking.
+**Delivery risk detection and metrics intelligence — automated, daily, without dashboards.**
 
 ---
 
-## What It Does
+## Problem
 
-Runs daily. No dashboards, no manual reports. Just a message in Telegram with the delivery snapshot your team actually needs.
+Delivery issues are visible in hindsight. By the time a Delivery Manager sees a pattern — rising cycle time, sprint overcommitment, growing WIP — the sprint is already failing or the release is already at risk.
 
-- Connects to one or multiple Jira projects (kanban and scrum)
-- Calculates Cycle Time, Lead Time, Throughput, and Predictability per source and in aggregate
-- For scrum boards: enriches predictability with active sprint commitment data via Jira Agile API
-- Sends a structured delivery snapshot to OpenAI and gets back actionable insights
-- Delivers the full report to Telegram (with graceful fallback if AI is unavailable)
+Jira dashboards exist but require manual interpretation. Teams don't lack data. They lack a system that reads that data daily, computes what matters, and tells them what to act on before it's too late.
 
-## Why It Exists
+This project is an answer to that gap.
 
-Most delivery reporting is manual, delayed, and generic. This system automates the entire pipeline — from raw Jira data to a prioritised, risk-aware report — so a Delivery Manager can focus on acting, not collecting.
+---
+
+## Solution
+
+A fully automated pipeline that runs daily, reads Jira at the source level, computes delivery metrics per methodology (kanban flow vs. scrum commitment), detects risk signals, and delivers an actionable report — no manual steps, no dashboards, no interpretation lag.
+
+The system separates two concerns deliberately:
+
+- **Metric computation is deterministic.** Cycle time, lead time, throughput, and predictability are calculated from raw Jira changelog data using explicit rules — not estimates, not approximations.
+- **AI handles interpretation.** OpenAI receives a structured snapshot and produces risk identification and recommended actions. AI does not touch metric calculation.
+
+---
+
+## Key Capabilities
+
+**Multi-source delivery contexts.** A single run covers multiple Jira projects simultaneously, each with its own methodology, JQL scope, and started-status definition. Kanban and Scrum are processed differently by design — not treated as the same data shape.
+
+**Sprint-aware Scrum predictability.** For Scrum boards, predictability is derived from active sprint commitment (completed committed / total committed) via Jira Agile API — not from raw issue ratios, which produce meaningless numbers mid-sprint.
+
+**Daily delivery snapshot with no manual trigger.** The pipeline is designed to run on a schedule (cron or n8n). Report arrives in Telegram every morning without anyone initiating it.
+
+**Graceful degradation.** If OpenAI is unavailable or over quota, the report still runs and delivers metrics. No hard dependency on AI for core functionality.
+
+**Dry-run mode.** Full pipeline — metrics, prompt construction, report formatting — runs locally on mock data with zero network calls. Useful for development and demonstration.
 
 ---
 
 ## Architecture
 
 ```
-Jira Cloud API ──► Ingestion Layer
-                        │
-                   Domain Model (Issue)
-                        │
-                   Metrics Engine
-              (Cycle Time · Lead Time · Throughput · Predictability)
-                        │
-              ┌─────────┴─────────┐
-           kanban               scrum
-           flow metrics     sprint commitment
-                        │
-                   AI Analysis (OpenAI Responses API)
-                        │
-                   Report Formatter
-                        │
-                   Telegram Delivery
+Jira Cloud REST API ──► Ingestion
+Jira Agile API ─────►  (changelog expand, sprint data)
+                              │
+                        Domain Model
+                        (Issue: id, type, status,
+                         createdAt, startedAt,
+                         resolvedAt, assignee,
+                         storyPoints, reopened)
+                              │
+                       Metrics Engine
+                    ┌──────────────────┐
+                  kanban             scrum
+              flow metrics      sprint commitment
+              (WIP, CT, LT,    (committed/completed
+               throughput)      via Agile API)
+                    └──────────────────┘
+                              │
+                     Risk Signal Detection
+                              │
+                     Prompt Builder
+                     (structured snapshot)
+                              │
+                     OpenAI Responses API
+                     (interpretation only)
+                              │
+                     Report Formatter
+                     (metrics + AI insights)
+                              │
+                     Telegram / Slack Delivery
 ```
 
-**Layers:**
-
-- `src/domain` — Issue entity and metrics calculation
-- `src/services/jira` — Jira REST + Agile API client, issue mapping, sprint insights
-- `src/services/analysis` — prompt builder and OpenAI Responses API integration
-- `src/services/reporting` — report formatter and Telegram/Slack publisher
-- `src/workflows` — daily analysis orchestration
-- `src/scripts` — dry-run testing, Jira simulation, data inspection
+Each layer has a single responsibility. The Metrics Engine has no knowledge of delivery channels. The AI layer receives a read-only snapshot. The Report Formatter does not call any APIs.
 
 ---
 
-## Stack
+## Metrics Model
 
-TypeScript · Node.js 20 · Jira Cloud REST API · Jira Agile API · OpenAI Responses API (o4-mini) · Telegram Bot API
+Metrics are derived from Jira changelog history, not from field values.
+
+**Cycle Time** = time from first transition into a started status (e.g., "In Progress") to resolution date. Computed per completed issue, averaged across the scope window.
+
+**Lead Time** = time from issue creation to resolution. Includes waiting time before work started. Higher lead time relative to cycle time indicates queuing or planning inefficiency.
+
+**Throughput** = count of resolved issues within the analysis scope. Used as a flow health indicator for kanban; for scrum it is compared against sprint commitment.
+
+**Predictability (Kanban)** = completed / total issues in scope. A flow-based proxy. Less meaningful mid-sprint; most useful over rolling time windows.
+
+**Predictability (Scrum)** = completed committed issues / total committed issues in active sprint. Pulled from Jira Agile API. Sprint scope is the denominator — not the total project scope. Falls back to kanban-style proxy if no active sprint is detected.
+
+**Reopened flag** = set if any changelog entry transitions an issue *from* Done to any non-done status. Used as a quality signal, not a metric in itself.
 
 ---
 
-## Key Engineering Decisions
+## Risk Detection
 
-**Scrum vs Kanban handled differently by design.** Kanban sources use flow-based metrics (WIP, throughput, lead time). Scrum sources enrich predictability from active sprint commitment via Jira Agile API — not raw issue count.
+The system passes the following signals to AI for interpretation. These are computed deterministically before AI is involved.
 
-**Graceful degradation.** If OpenAI is unavailable, the report still runs and delivers to Telegram with metrics intact. No hard failures on optional dependencies.
+| Signal | Definition | Risk Implication |
+|---|---|---|
+| Predictability < 70% | Completion rate below threshold | Overcommitment or scope instability |
+| Cycle Time increasing | Current CT > rolling baseline | Bottleneck forming in flow |
+| High WIP | In-progress count relative to throughput | Context switching, blocked work |
+| Reopened issues present | Issues transitioned out of Done | Quality or acceptance criteria issues |
+| Backlog growing | Backlog size increasing without throughput increase | Intake exceeds capacity |
+| No active sprint (Scrum) | Board has future sprints but none started | Planning lag, sprint not initiated |
 
-**Multi-source from day one.** `JIRA_SOURCES` supports multiple projects with independent methodology, JQL, and status configuration — composable delivery contexts out of the box.
-
-**Testable without network.** `dryRun.ts` runs the full pipeline on mock data — metrics, prompt construction, report formatting — no Jira or OpenAI connection needed.
+AI receives these signals as a structured input and is tasked with identifying root causes and suggesting actions — not with detecting the signals themselves.
 
 ---
 
-## Quick Start
+## System vs AI Responsibilities
+
+| Responsibility | System | AI |
+|---|---|---|
+| Fetch Jira data | ✅ | ✗ |
+| Compute cycle time, lead time | ✅ | ✗ |
+| Calculate sprint predictability | ✅ | ✗ |
+| Detect risk signals | ✅ | ✗ |
+| Identify root causes | ✗ | ✅ |
+| Suggest actions | ✗ | ✅ |
+| Format and deliver report | ✅ | ✗ |
+
+If OpenAI is unavailable, the system still delivers a complete metrics report. AI is an enhancement layer, not a dependency.
+
+---
+
+## Example Scenario
+
+**Input:** Two Jira projects — one kanban (KAN), one scrum (SCR). Active sprint in SCR with 8 committed issues.
+
+**System computes:**
+- KAN: CT = 4.2d, LT = 9.1d, throughput = 6, WIP = 4, predictability = 55%
+- SCR: active sprint "Sprint 12", 3/8 committed issues completed, sprint predictability = 37.5%
+- SCR: 2 issues reopened this week
+
+**Risk signals detected:**
+- SCR predictability 37.5% — well below 70% threshold with sprint half complete
+- KAN WIP = 4 against throughput of 6 — elevated
+- 2 reopened issues in SCR — quality signal
+
+**AI receives** a structured snapshot with these numbers and signals.
+
+**Report delivered to Telegram:**
+```
+📊 Delivery Report — 19 Apr 2026
+
+━━━ Overview ━━━
+✅ Completed: 9   🔄 In Progress: 6   📋 Backlog: 5
+⚠️ Reopened: 2   🔴 Predictability: 46%
+⏱ Cycle Time: 4.8d   📅 Lead Time: 9.4d   🚀 Throughput: 9
+
+━━━ AI Analysis ━━━
+Summary: SCR sprint is at serious risk of incomplete delivery with 37.5%
+predictability at midpoint. KAN flow is under pressure from elevated WIP.
+
+Risks:
+- SCR sprint likely to miss 4-5 committed items at current pace
+- 2 reopened issues suggest acceptance criteria gaps or QA handoff issues
+- KAN WIP-to-throughput ratio indicates parallel work is slowing completion
+
+Actions:
+- Review SCR sprint scope now — descope or reassign before end of week
+- Block new KAN intake until WIP drops to ≤3
+- Run a 15-min retro on reopened items to identify the root cause pattern
+```
+
+**Decision enabled:** Sprint descoping conversation happens on day 10, not day 14.
+
+---
+
+## Impact
+
+| Before | After |
+|---|---|
+| Delivery issues visible at sprint end | Issues surfaced mid-sprint |
+| Manual Jira board review | Automated daily snapshot |
+| Gut-feel sprint health | Quantified predictability signal |
+| Generic retrospective | Targeted action from specific signals |
+| One project at a time | Multi-project aggregate + per-source breakdown |
+
+---
+
+## Technical Highlights
+
+- Changelog-based metric derivation — no custom Jira fields required for cycle time
+- Scrum predictability uses Jira Agile API board and sprint endpoints, not issue counts
+- `JIRA_SOURCES` config supports N projects with independent methodology, JQL, and status mapping
+- OpenAI Responses API with `reasoning.effort` — deterministic prompt, AI handles interpretation only
+- Telegram delivery with 4096-char chunking for long reports
+- Full pipeline testable locally via `dryRun.ts` — no Jira or OpenAI credentials needed
+
+---
+
+## How to Run
 
 ```bash
 cp .env.example .env
-# fill in JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_SOURCES
-# fill in OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Configure: JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_SOURCES
+# Configure: OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 npm install
 npm run dev
 ```
 
-Test the full pipeline without network calls:
-
+Test without network:
 ```bash
 node --loader ts-node/esm src/scripts/dryRun.ts
 ```
 
----
-
-## Configuration
-
-Multi-project sources via `JIRA_SOURCES`:
-
+Multi-project source format:
 ```
+key|methodology|projectKey|jql|startedStatuses
 kanban|kanban|KAN|project = "KAN" ORDER BY updated DESC|In Progress;scrum|scrum|SCRUM|project = "SCRUM" ORDER BY updated DESC|In Progress
 ```
-
-Format: `key|methodology|projectKey|jql|startedStatuses`
-
-If `JIRA_SOURCES` is not set, falls back to `JIRA_PROJECT_KEY` + `JIRA_JQL`.
-If `OPENAI_API_KEY` is not set or quota is exceeded, the report is delivered without AI analysis.
-
----
-
-## RU — О проекте
-
-Система автоматического delivery-анализа: забирает данные из Jira, считает ключевые метрики разработки и отправляет AI-отчёт в Telegram — без участия человека.
-
-**Для kanban** — метрики потока: WIP, throughput, cycle time, lead time.
-**Для scrum** — predictability считается от commitment активного спринта через Jira Agile API.
-
-Проект показывает системное мышление в автоматизации delivery: разделение на слои, работу с реальными API, graceful degradation и production-ready подход к конфигурации и тестированию.
