@@ -9,26 +9,45 @@ export function formatReport(
   issues: Issue[],
   sources: SourceMetrics[]
 ): string {
-  const completedIssues = issues.filter((issue) => issue.resolvedAt);
   const reopenedIssues = issues.filter((issue) => issue.reopened);
+  const date = new Date().toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  });
 
-  return [
-    "Delivery Report",
+  const predictabilityIcon = metrics.predictability >= 0.8 ? "🟢" : metrics.predictability >= 0.6 ? "🟡" : "🔴";
+
+  const sections: string[] = [
+    `📊 Delivery Report — ${date}`,
     "",
-    `Issues in scope: ${issues.length}`,
-    `Completed issues: ${completedIssues.length}`,
-    `Reopened issues: ${reopenedIssues.length}`,
-    `Backlog size: ${metrics.backlogSize}`,
-    `In Progress count: ${metrics.inProgressCount}`,
-    `Cycle Time: ${metrics.cycleTimeHours.toFixed(2)}h`,
-    `Lead Time: ${metrics.leadTimeHours.toFixed(2)}h`,
-    `Throughput: ${metrics.throughput}`,
-    `Predictability: ${(metrics.predictability * 100).toFixed(1)}%`,
-    "",
-    "Source breakdown",
-    "",
-    ...sources.map((source) => formatSourceSummary(source)),
-    "",
-    analysis
-  ].join("\n");
+    "━━━ Overview ━━━",
+    `✅ Completed: ${metrics.completedCount}   🔄 In Progress: ${metrics.inProgressCount}   📋 Backlog: ${metrics.backlogSize}`,
+    reopenedIssues.length > 0
+      ? `⚠️ Reopened: ${reopenedIssues.length}   ${predictabilityIcon} Predictability: ${(metrics.predictability * 100).toFixed(0)}%`
+      : `${predictabilityIcon} Predictability: ${(metrics.predictability * 100).toFixed(0)}%`,
+    `⏱ Cycle Time: ${formatHours(metrics.cycleTimeHours)}   📅 Lead Time: ${formatHours(metrics.leadTimeHours)}   🚀 Throughput: ${metrics.throughput}`,
+  ];
+
+  if (sources.length > 1) {
+    sections.push("");
+    sections.push("━━━ Sources ━━━");
+    for (const source of sources) {
+      sections.push("");
+      sections.push(formatSourceSummary(source));
+    }
+  }
+
+  sections.push("");
+  sections.push("━━━ AI Analysis ━━━");
+  sections.push(analysis);
+
+  return sections.join("\n");
+}
+
+function formatHours(hours: number): string {
+  if (hours === 0) return "—";
+  if (hours < 24) return `${hours.toFixed(0)}h`;
+  const days = hours / 24;
+  return `${days.toFixed(1)}d`;
 }
