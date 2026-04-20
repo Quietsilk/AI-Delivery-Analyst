@@ -82,6 +82,71 @@ test("mapJiraIssue normalizes jira search issue into domain issue", () => {
   assert.equal(result.reopened, true);
 });
 
+test("mapJiraIssue keeps resolvedAt null when issue is reopened and currently not done", () => {
+  const result = mapJiraIssue(
+    {
+      id: "10002",
+      key: "TEAM-2",
+      fields: {
+        issuetype: { name: "Task" },
+        status: { name: "In Progress" },
+        created: "2026-04-01T08:00:00.000Z",
+        resolutiondate: null,
+        assignee: { displayName: "Sam" },
+        customfield_10016: 3,
+        timeoriginalestimate: 14400
+      },
+      changelog: {
+        histories: [
+          {
+            created: "2026-04-01T09:00:00.000Z",
+            items: [{ field: "status", fromString: "To Do", toString: "In Progress" }]
+          },
+          {
+            created: "2026-04-02T10:00:00.000Z",
+            items: [{ field: "status", fromString: "In Progress", toString: "Done" }]
+          },
+          {
+            created: "2026-04-03T11:00:00.000Z",
+            items: [{ field: "status", fromString: "Done", toString: "In Progress" }]
+          }
+        ]
+      }
+    },
+    {
+      jiraBaseUrl: "https://example.atlassian.net",
+      jiraEmail: "team@example.com",
+      jiraApiToken: "token",
+      jiraProjectKey: "TEAM",
+      jiraJql: "project = TEAM",
+      jiraStartedStatuses: ["In Progress"],
+      jiraSources: [
+        {
+          key: "team",
+          projectKey: "TEAM",
+          methodology: "kanban",
+          jql: "project = TEAM",
+          startedStatuses: ["In Progress"]
+        }
+      ],
+      jiraStoryPointsField: "customfield_10016",
+      jiraOriginalEstimateField: "timeoriginalestimate",
+      jiraPageSize: 50,
+      openAiApiKey: "test",
+      openAiBaseUrl: "https://api.openai.com/v1",
+      openAiModel: "gpt-5-mini",
+      openAiReasoningEffort: "medium",
+      reportChannel: "telegram",
+      telegramBotToken: "test-token",
+      telegramChatId: "123456",
+      slackWebhookUrl: ""
+    }
+  );
+
+  assert.equal(result.reopened, true);
+  assert.equal(result.resolvedAt, null);
+});
+
 test("buildPrompt includes issue context for AI analysis", () => {
   const prompt = buildPrompt(
       {
