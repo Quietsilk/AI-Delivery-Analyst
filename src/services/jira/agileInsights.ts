@@ -31,6 +31,7 @@ interface AgileSprintIssuesResponse {
       };
     };
   }>;
+  total?: number;
 }
 
 type AgileSprint = NonNullable<AgileSprintsResponse["values"]>[number];
@@ -65,10 +66,14 @@ export async function fetchScrumSprintInsight(
   }
 
   const sprintIssues = await fetchSprintIssues(config, board.id, activeSprint.id);
-  const committedIssueKeys = new Set(sprintIssues.map((issue) => issue.key));
-  const completedCommittedIssues = sprintIssues.filter((issue) =>
-    Boolean(issue.fields?.resolutiondate) || issue.fields?.status?.name === "Done"
-  ).length;
+  const completedCommittedIssues = sprintIssues.filter((issue) => {
+    if (Boolean(issue.fields?.resolutiondate)) {
+      return true;
+    }
+
+    const status = (issue.fields?.status?.name ?? "").toLowerCase();
+    return isDoneLikeStatus(status);
+  }).length;
   const committedIssues = sprintIssues.length;
 
   void sourceIssues;
@@ -144,28 +149,56 @@ async function fetchSprintIssues(
   boardId: number,
   sprintId: number
 ): Promise<AgileSprintIssue[]> {
-  const url = new URL(
-    `/rest/agile/1.0/board/${boardId}/sprint/${sprintId}/issue`,
-    config.jiraBaseUrl
-  );
-  url.searchParams.set("maxResults", "100");
+  const allIssues: AgileSprintIssue[] = [];
+  const pageSize = 100;
+  let startAt = 0;
 
-  const response = await fetch(url, {
-    headers: {
-      "Accept": "application/json",
-      "Authorization": `Basic ${getBasicAuthToken(config)}`
-    }
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `Failed to fetch Jira sprint issues for board ${boardId} sprint ${sprintId}: ${response.status} ${body.slice(0, 1000)}`
+  while (true) {
+    const url = new URL(
+      `/rest/agile/1.0/board/${boardId}/sprint/${sprintId}/issue`,
+      config.jiraBaseUrl
     );
+    url.searchParams.set("maxResults", String(pageSize));
+    url.searchParams.set("startAt", String(startAt));
+
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "Authorization": `Basic ${getBasicAuthToken(config)}`
+      }
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `Failed to fetch Jira sprint issues for board ${boardId} sprint ${sprintId}: ${response.status} ${body.slice(0, 1000)}`
+      );
+    }
+
+    const payload = (await response.json()) as AgileSprintIssuesResponse;
+    const pageIssues = payload.issues ?? [];
+    allIssues.push(...pageIssues);
+
+    startAt += pageIssues.length;
+
+    if (pageIssues.length === 0) {
+      break;
+    }
+
+    if (typeof payload.total === "number" && startAt >= payload.total) {
+      break;
+    }
+
+    if (pageIssues.length < pageSize) {
+      break;
+    }
   }
 
-  const payload = (await response.json()) as AgileSprintIssuesResponse;
-  return payload.issues ?? [];
+  return allIssues;
+}
+
+function isDoneLikeStatus(status: string): boolean {
+  return ["done", "closed", "resolved", "complete", "completed"].includes(status);
 }
 
 function getBasicAuthToken(config: AppConfig): string {
