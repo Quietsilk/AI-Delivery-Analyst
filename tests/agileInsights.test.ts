@@ -32,13 +32,13 @@ const scrumSource: JiraSourceConfig = {
   startedStatuses: ["In Progress"]
 };
 
-function jsonResponse(payload: unknown): Response {
-  return new Response(JSON.stringify(payload), {
+function jsonResponse(payload: unknown): { ok: true; status: number; json: () => Promise<unknown>; text: () => Promise<string> } {
+  return {
+    ok: true,
     status: 200,
-    headers: {
-      "Content-Type": "application/json"
-    }
-  });
+    json: async () => payload,
+    text: async () => JSON.stringify(payload)
+  };
 }
 
 test("fetchScrumSprintInsight paginates sprint issues and counts done-like statuses", async (t) => {
@@ -48,8 +48,14 @@ test("fetchScrumSprintInsight paginates sprint issues and counts done-like statu
     globalThis.fetch = originalFetch;
   });
 
-  globalThis.fetch = (async (input: string | URL | Request): Promise<Response> => {
-    const url = new URL(typeof input === "string" ? input : input.url);
+  globalThis.fetch = (async (input: unknown) => {
+    const requestUrl =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as { url: string }).url;
+    const url = new URL(requestUrl);
 
     if (url.pathname === "/rest/agile/1.0/board") {
       return jsonResponse({
@@ -61,7 +67,7 @@ test("fetchScrumSprintInsight paginates sprint issues and counts done-like statu
             location: { projectKey: "SCR" }
           }
         ]
-      });
+      }) as unknown as Response;
     }
 
     if (url.pathname === "/rest/agile/1.0/board/1/sprint") {
@@ -69,7 +75,7 @@ test("fetchScrumSprintInsight paginates sprint issues and counts done-like statu
         values: [
           { id: 42, name: "Sprint 42", state: "active" }
         ]
-      });
+      }) as unknown as Response;
     }
 
     if (url.pathname === "/rest/agile/1.0/board/1/sprint/42/issue") {
@@ -87,7 +93,7 @@ test("fetchScrumSprintInsight paginates sprint issues and counts done-like statu
         return jsonResponse({
           issues,
           total: 101
-        });
+        }) as unknown as Response;
       }
 
       return jsonResponse({
@@ -101,7 +107,7 @@ test("fetchScrumSprintInsight paginates sprint issues and counts done-like statu
           }
         ],
         total: 101
-      });
+      }) as unknown as Response;
     }
 
     throw new Error(`Unexpected fetch URL: ${url.toString()}`);
