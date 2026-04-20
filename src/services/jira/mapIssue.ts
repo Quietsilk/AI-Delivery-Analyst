@@ -45,7 +45,7 @@ function detectStartedAt(
   histories: JiraHistory[],
   startedStatuses: string[]
 ): string | null {
-  const allowedStatuses = new Set(startedStatuses.map((status) => status.toLowerCase()));
+  const allowedStatuses = new Set(startedStatuses.map((statusName) => statusName.toLowerCase()));
 
   const startedTransition = histories
     .slice()
@@ -100,16 +100,22 @@ function detectResolvedAt(
   fields: Record<string, unknown>,
   histories: JiraHistory[]
 ): string | null {
+  const currentStatus = (getNestedString(fields, ["status", "name"]) ?? "").toLowerCase();
+  const isCurrentlyDone = isDoneLikeStatus(currentStatus);
   const resolutionDate = getStringField(fields["resolutiondate"]);
 
-  if (resolutionDate) {
+  if (resolutionDate && isCurrentlyDone) {
     return resolutionDate;
+  }
+
+  if (!isCurrentlyDone) {
+    return null;
   }
 
   const doneTransition = histories
     .slice()
     .sort((left, right) => Date.parse(left.created) - Date.parse(right.created))
-    .find((history) =>
+    .filter((history) =>
       history.items.some((item) => {
         if (item.field.toLowerCase() !== "status") {
           return false;
@@ -117,7 +123,8 @@ function detectResolvedAt(
 
         return isDoneLikeStatus((item.toString ?? "").toLowerCase());
       })
-    );
+    )
+    .at(-1);
 
   return doneTransition?.created ?? null;
 }
