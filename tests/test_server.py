@@ -68,7 +68,6 @@ class TestCalculateMetrics(unittest.TestCase):
     def test_empty(self):
         m = server.calculate_metrics([])
         self.assertEqual(m["throughput"], 0)
-        self.assertEqual(m["doneRatePercent"], 0)
         self.assertEqual(m["cycleTimeDays"], 0)
         self.assertEqual(m["leadTimeDays"], 0)
         self.assertEqual(m["backlogSize"], 0)
@@ -87,7 +86,6 @@ class TestCalculateMetrics(unittest.TestCase):
         )
         m = server.calculate_metrics([issue])
         self.assertEqual(m["throughput"], 1)
-        self.assertEqual(m["doneRatePercent"], 100.0)
         self.assertEqual(m["cycleTimeDays"], 3.0)   # Jan 2 → Jan 5
         self.assertEqual(m["leadTimeDays"], 4.0)    # Jan 1 → Jan 5
         self.assertEqual(m["reopenedCount"], 0)
@@ -192,9 +190,8 @@ class TestCalculateMetrics(unittest.TestCase):
         self.assertEqual(m["throughput"], 1)
         self.assertEqual(m["inProgressCount"], 1)
         self.assertEqual(m["backlogSize"], 1)
-        self.assertAlmostEqual(m["doneRatePercent"], 33.3)
 
-    def test_done_rate_all_done(self):
+    def test_throughput_all_done(self):
         issues = [
             make_issue(
                 key=f"T-{i}", status="Done",
@@ -208,8 +205,8 @@ class TestCalculateMetrics(unittest.TestCase):
             for i in range(5)
         ]
         m = server.calculate_metrics(issues)
-        self.assertEqual(m["doneRatePercent"], 100.0)
         self.assertEqual(m["throughput"], 5)
+        self.assertNotIn("doneRatePercent", m)
 
     def test_issue_without_started_transition_has_zero_cycle_time(self):
         issue = make_issue(
@@ -450,7 +447,7 @@ class TestHttpIntegration(unittest.TestCase):
 
         self.assertTrue(body["ok"])
         self.assertEqual(body["dashboard"]["throughput"], 1)
-        self.assertEqual(body["dashboard"]["doneRatePercent"], 100.0)
+        self.assertNotIn("doneRatePercent", body["dashboard"])
         self.assertFalse(body["dashboard"]["aiEnabled"])
 
     def test_post_returns_500_on_jira_error(self):

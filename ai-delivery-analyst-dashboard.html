@@ -351,7 +351,7 @@
     .sync-dismiss:hover { opacity: 1; }
 
     /* KPI row */
-    .kpi-row { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
+    .kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
 
     .kpi-card {
       background: var(--card);
@@ -448,12 +448,12 @@
     @media (max-width: 900px) {
       .app-body { grid-template-columns: 1fr; }
       .sidebar  { border-right: none; border-bottom: 1px solid var(--border); }
-      .kpi-row  { grid-template-columns: repeat(3,1fr); }
+      .kpi-row  { grid-template-columns: repeat(2,1fr); }
       .two-col  { grid-template-columns: 1fr; }
       .actions-list { columns: 1; }
     }
     @media (max-width: 520px) {
-      .kpi-row { grid-template-columns: repeat(2,1fr); }
+      .kpi-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -539,13 +539,6 @@
 
         <!-- KPI row -->
         <div class="kpi-row">
-          <div class="kpi-card" id="kpi-done-rate-card">
-            <div class="kpi-label">Done Rate</div>
-            <div class="kpi-bottom">
-              <span class="kpi-value" id="kpi-done-rate-value">—</span>
-              <span class="kpi-delta" id="kpi-done-rate-delta"></span>
-            </div>
-          </div>
           <div class="kpi-card" id="kpi-cycle-time-card">
             <div class="kpi-label">Cycle Time</div>
             <div class="kpi-bottom">
@@ -984,7 +977,7 @@
 
     // ── Run ───────────────────────────────────────────────────
     function flashKpi() {
-      ["kpi-done-rate-card","kpi-cycle-time-card","kpi-throughput-card","kpi-lead-time-card","kpi-reopened-card"]
+      ["kpi-cycle-time-card","kpi-throughput-card","kpi-lead-time-card","kpi-reopened-card"]
         .forEach((id, i) => setTimeout(() => {
           const el = document.getElementById(id);
           el.classList.remove("flashing");
@@ -1015,7 +1008,6 @@
     }
 
     function updateDashboard(d) {
-      document.getElementById("kpi-done-rate-value").textContent  = (d.doneRatePercent ?? 0).toFixed(1) + "%";
       document.getElementById("kpi-cycle-time-value").textContent = d.cycleTimeDays.toFixed(1) + "d";
       document.getElementById("kpi-throughput-value").textContent = d.throughput + (d.throughputPeriodLabel ? " / " + d.throughputPeriodLabel : "");
       document.getElementById("kpi-lead-time-value").textContent  = d.leadTimeDays.toFixed(1) + "d";
@@ -1025,7 +1017,6 @@
       const reopenedCard = document.getElementById("kpi-reopened-card");
       reopenedCard.classList.toggle("kpi-warn", reopened > 0);
 
-      setDelta("kpi-done-rate-delta",  d.doneRatePercent ?? 0, prevKpi?.doneRatePercent ?? null, false, "%");
       setDelta("kpi-cycle-time-delta", d.cycleTimeDays,        prevKpi?.cycleTimeDays ?? null,   true,  "d");
       setDelta("kpi-throughput-delta", d.throughput,           prevKpi?.throughput ?? null,       false, "");
       setDelta("kpi-lead-time-delta",  d.leadTimeDays,         prevKpi?.leadTimeDays ?? null,     true,  "d");
@@ -1128,11 +1119,11 @@
     // ── Demo data ─────────────────────────────────────────────
     function loadDemoData() {
       const snapshots = [
-        { doneRatePercent: 58.3, cycleTimeDays: 6.1, throughput: 14, throughputPeriodLabel: "30d", leadTimeDays: 11.4, reopenedCount: 2 },
-        { doneRatePercent: 61.9, cycleTimeDays: 5.7, throughput: 16, throughputPeriodLabel: "30d", leadTimeDays: 10.8, reopenedCount: 1 },
-        { doneRatePercent: 67.4, cycleTimeDays: 4.9, throughput: 19, throughputPeriodLabel: "30d", leadTimeDays: 9.3,  reopenedCount: 0 },
-        { doneRatePercent: 63.2, cycleTimeDays: 5.3, throughput: 17, throughputPeriodLabel: "30d", leadTimeDays: 9.9,  reopenedCount: 3 },
-        { doneRatePercent: 72.1, cycleTimeDays: 4.2, throughput: 23, throughputPeriodLabel: "30d", leadTimeDays: 8.7,  reopenedCount: 0 },
+        { cycleTimeDays: 6.1, throughput: 14, throughputPeriodLabel: "30d", leadTimeDays: 11.4, reopenedCount: 2 },
+        { cycleTimeDays: 5.7, throughput: 16, throughputPeriodLabel: "30d", leadTimeDays: 10.8, reopenedCount: 1 },
+        { cycleTimeDays: 4.9, throughput: 19, throughputPeriodLabel: "30d", leadTimeDays: 9.3,  reopenedCount: 0 },
+        { cycleTimeDays: 5.3, throughput: 17, throughputPeriodLabel: "30d", leadTimeDays: 9.9,  reopenedCount: 3 },
+        { cycleTimeDays: 4.2, throughput: 23, throughputPeriodLabel: "30d", leadTimeDays: 8.7,  reopenedCount: 0 },
       ];
 
       const analysis =
