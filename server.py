@@ -209,11 +209,22 @@ def call_openai(metrics, api_key, period_label="all time"):
                 or "AI analysis unavailable."
             )
         except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < 2:
-                wait = 5 * (attempt + 1)
-                print(f"  OpenAI 429 — retrying in {wait}s (attempt {attempt + 1}/3)…")
-                time.sleep(wait)
-                continue
+            if e.code == 429:
+                body = e.read().decode()
+                err_code = ""
+                try:
+                    err_code = json.loads(body).get("error", {}).get("code", "")
+                except Exception:
+                    pass
+                if err_code == "insufficient_quota":
+                    raise RuntimeError("OpenAI quota exceeded — add credits at platform.openai.com/settings/billing")
+                if attempt < 2:
+                    retry_after = e.headers.get("Retry-After") or e.headers.get("x-ratelimit-reset-requests")
+                    wait = int(retry_after) if retry_after and str(retry_after).isdigit() else 30 * (attempt + 1)
+                    wait = min(wait, 90)
+                    print(f"  OpenAI 429 — retrying in {wait}s (attempt {attempt + 1}/3)…")
+                    time.sleep(wait)
+                    continue
             raise
 
 
