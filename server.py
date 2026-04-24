@@ -9,8 +9,10 @@ Returns: { ok, dashboard: { predictabilityPercent, cycleTimeDays, throughput, le
 import json
 import base64
 import os
+import time
 import urllib.request
 import urllib.parse
+import urllib.error
 import http.server
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
@@ -197,13 +199,22 @@ def call_openai(metrics, api_key, period_label="all time"):
         data=body,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        data = json.loads(r.read())
-    return (
-        data.get("output_text")
-        or (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
-        or "AI analysis unavailable."
-    )
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = json.loads(r.read())
+            return (
+                data.get("output_text")
+                or (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                or "AI analysis unavailable."
+            )
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < 2:
+                wait = 5 * (attempt + 1)
+                print(f"  OpenAI 429 — retrying in {wait}s (attempt {attempt + 1}/3)…")
+                time.sleep(wait)
+                continue
+            raise
 
 
 def _split_telegram(text, max_len=4096):
