@@ -1,7 +1,22 @@
 # Risks
 
-- Jira API token is temporary and currently expires on April 30, 2026. If it is not rotated before that date, live Jira ingestion and test runs will fail.
-- The current integration assumes `In Progress` is the start status. If the project workflow changes or adds parallel in-progress states, `startedAt` may become inaccurate until `JIRA_STARTED_STATUSES` is updated.
-- Story points exist in more than one field on this Jira instance (`customfield_10016` and `customfield_10038`). The project currently uses `customfield_10016`, so this should be revalidated if issue types or Jira configuration change.
-- Scrum predictability becomes sprint-aware only when an active sprint exists and issues are actually committed to it. Future-only sprint setups still fall back to a proxy metric.
-- Jira simulation currently uses generic issue transitions and assumes a simple workflow (`To Do`, `In Progress`, `Done`). Projects with customized workflows may require source-specific scenario rules.
+## Активные
+
+**Jira API token истекает 30 апреля 2026.**
+Если не ротировать — live-синк перестанет работать. Нужно обновить токен в `.env` и в localStorage дашборда до этой даты.
+
+**STARTED/DONE статусы захардкожены.**
+Если в Jira-проекте используются нестандартные названия статусов (не входящие в текущий set), `started_at` будет `None` у всех задач → Cycle Time и Lead Time = 0. Workaround: добавить статус в `STARTED` / `DONE` в `server.py` вручную. Долгосрочно — вынести в конфиг.
+
+**Нет persistent storage.**
+История синков хранится только в localStorage браузера (≤30 записей). Очистка браузера, другое устройство или другой браузер — история теряется. Риск умеренный пока нет потребности в долгосрочных трендах.
+
+**Один процесс, нет graceful shutdown.**
+`server.py` не обрабатывает сигналы, не делает graceful shutdown соединений. При `Ctrl+C` в середине длинного Jira-запроса — запрос обрывается. Некритично для текущего use case.
+
+## Снятые риски
+
+~~TypeScript/Node.js версионные конфликты~~ — стек переведён на Python stdlib.
+~~n8n как точка отказа~~ — n8n удалён, сервер самодостаточен.
+~~Hard cut Telegram-сообщений~~ — реализован умный чанкинг.
+~~Case-sensitive статусы (BUG-S01)~~ — исправлено, все сравнения через `.lower()`.

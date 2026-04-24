@@ -1,6 +1,6 @@
 # AI Delivery Analyst — Project Context
 
-Используется для загрузки в AI-агента как стартовый контекст.
+Стартовый контекст для AI-агента. Актуально на апрель 2026.
 
 ---
 
@@ -8,71 +8,92 @@
 
 https://github.com/Quietsilk/AI-Delivery-Analyst
 
-## Stack
+## Стек
 
-TypeScript · Node.js 20 · Jira Cloud REST API · Jira Agile API · OpenAI Responses API (o4-mini) · Telegram Bot API
-
----
-
-## What Is Built
-
-Полный автоматический пайплайн: **Jira → метрики → AI анализ → Telegram отчёт.**
-
-### Config — `src/config/env.ts`
-Конфигурация через env. `JIRA_SOURCES` поддерживает несколько проектов:
-`key|methodology|projectKey|jql|startedStatuses` через `;`.
-Поля: `telegramBotToken`, `telegramChatId`, `slackWebhookUrl`, `openAiApiKey`, `openAiModel`, `openAiReasoningEffort`.
-
-### Domain — `src/domain/`
-- `Issue` — доменная модель: id, type, status, createdAt, startedAt, resolvedAt, assignee, estimate, storyPoints, reopened
-- `calculateMetrics` — Cycle Time, Lead Time, Throughput, Predictability, backlogSize, inProgressCount, completedCount
-
-### Jira — `src/services/jira/`
-- `JiraClient` — REST API клиент с пагинацией и changelog expand
-- `mapIssue` — маппинг raw Jira issue в доменную модель; startedAt из changelog по startedStatuses; определение reopened
-- `agileInsights` — Jira Agile API: board по projectKey, active sprint, predictability от commitment (completedCommitted / committed)
-
-### Analysis — `src/services/analysis/`
-- `DeliveryAnalyst` — вызов OpenAI Responses API `/v1/responses` с reasoning effort; graceful skip при 429/402 и при отсутствии ключа
-- `buildPrompt` — structured prompt: aggregate метрики + per-source breakdown (kanban vs scrum) + active sprint контекст + sample открытых задач
-
-### Reporting — `src/services/reporting/`
-- `ReportFormatter` — отчёт с эмодзи, секциями (Overview / Sources / AI Analysis), цветовыми индикаторами 🟢🟡🔴, метрики в днях
-- `ReportPublisher` — Telegram (sendMessage, chunking 4096 символов) или Slack (webhook); роутинг по `REPORT_CHANNEL`
-
-### Orchestration — `src/workflows/runDailyDeliveryAnalysis.ts`
-fetch issues → scrum insight → metrics → AI → format → publish
-
-### Scripts — `src/scripts/`
-- `dryRun.ts` — полный прогон на mock данных без сети
-- `simulateJira.ts` — создание тестовых задач и движение по статусам
-- `inspectJira.ts` — инспекция живых Jira данных
+Python 3.9+ · stdlib only (http.server, urllib, json) · Jira Cloud REST API · OpenAI Responses API (o4-mini) · Telegram Bot API · Vanilla JS/HTML дашборд
 
 ---
 
-## Current .env Config
+## Архитектура
 
-| Variable | Value |
+Два компонента:
+
+**`server.py`** — Python HTTP-сервер без зависимостей:
+- `GET /` → отдаёт `ai-delivery-analyst-dashboard.html`
+- `POST /webhook/sync-report` → полный pipeline: Jira → метрики → OpenAI → Telegram → JSON-ответ
+
+**`ai-delivery-analyst-dashboard.html`** — однофайловый браузерный UI:
+- Вводит Jira credentials (хранит в localStorage)
+- Управляет проектными табами и JQL
+- Period-фильтр (7d / 30d / 90d / All)
+- Визуализирует KPI, риски, действия, chart
+
+---
+
+## Ключевые модули server.py
+
+| Функция | Что делает |
 |---|---|
-| JIRA_BASE_URL | https://nhcompany.atlassian.net |
-| JIRA_EMAIL | melnikov.lives@gmail.com |
-| JIRA_SOURCES | TESTKANBAN (kanban), TESTSCRUM (scrum) |
-| OPENAI_MODEL | o4-mini |
-| OPENAI_REASONING_EFFORT | medium |
-| REPORT_CHANNEL | telegram |
-| TELEGRAM_BOT | @delivery_analyst_bot |
+| `fetch_jira()` | Пагинация (`PAGE_SIZE=50`), отдельный changelog для resolved + in-progress |
+| `calculate_metrics(issues, cutoff)` | Cycle Time, Lead Time, Throughput, Predictability, Backlog, WIP, Reopened |
+| `_parse_dt(s)` | ISO 8601 → datetime, обрабатывает Z и +00:00 |
+| `call_openai(metrics, api_key, period_label)` | OpenAI Responses API, o4-mini |
+| `send_telegram(text, token, chat_id)` | Умный split по `\n` / ` ` / hard cut |
+| `_split_telegram(text, max_len)` | Чанкинг Telegram-сообщений ≤4096 символов |
+| `load_env(path)` | Парсит .env без зависимостей |
 
 ---
 
-## What Is Not Done
+## Статусы
 
-- OpenAI токены не куплены — AI анализ скипается gracefully, отчёт всё равно уходит
-- n8n workflow заготовки есть в `/n8n`, не подключены
-- Slack не тестировался
+```python
+STARTED = {"in progress", "selected for development", "в работе", "in development"}
+DONE    = {"done", "closed", "resolved", "выполнено", "complete"}
+```
 
-## Suggested Next Steps
+Все сравнения — **case-insensitive** (`.lower()`).
 
-1. Пополнить OpenAI баланс → запустить полный цикл с AI анализом
-2. Подключить n8n как cron orchestrator для daily run
-3. Добавить группу Telegram вместо личной переписки
-4. Расширить метрики: flow efficiency, aging WIP, blocked issues
+---
+
+## Переменные окружения (server.py)
+
+| Переменная | Назначение |
+|---|---|
+| `OPENAI_API_KEY` | AI-анализ (опционально) |
+| `TELEGRAM_BOT_TOKEN` | Отправка отчётов (опционально) |
+| `TELEGRAM_CHAT_ID` | Получатель Telegram (опционально) |
+
+Jira credentials → UI → localStorage (не в .env).
+
+---
+
+## Тесты
+
+`tests/test_server.py` — 33 теста, stdlib unittest.
+
+```bash
+python3 -m unittest tests/test_server.py
+```
+
+---
+
+## Известные ограничения
+
+- Статусы STARTED/DONE — хардкод в server.py (не конфигурируются через UI)
+- Нет хранилища истории синков (только в памяти браузера через localStorage, ≤30 записей)
+- Один проект на синк (multi-source не реализован)
+- Нет scheduled/cron запуска — только ручной синк через UI
+
+---
+
+## Что сделано (хронология)
+
+1. TypeScript-прототип (src/) — выпилен в пользу Python (коммит `6d88e48`)
+2. Python stdlib HTTP-сервер + однофайловый HTML-дашборд
+3. Jira API: POST /search/jql + отдельный changelog fetch
+4. Пагинация (PAGE_SIZE=50, isLast loop)
+5. Period-фильтр (7d/30d/90d/all) — server-side cutoff по resolved_at
+6. localStorage-персистентность (credentials, projects, history)
+7. Case-insensitive статусы (BUG-S01)
+8. Smart Telegram chunking (BUG-S04 port)
+9. Regression suite (33 тестов)
