@@ -264,11 +264,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(500, {"ok": False, "error": str(e)})
 
     def _handle(self, body):
-        base_url  = body.get("baseUrl", "").rstrip("/")
-        email     = body.get("email", "")
-        api_token = body.get("apiToken", "")
-        jql       = body.get("jql", "")
-        period    = body.get("period", "all")
+        base_url     = body.get("baseUrl", "").rstrip("/")
+        email        = body.get("email", "")
+        api_token    = body.get("apiToken", "")
+        jql          = body.get("jql", "")
+        period       = body.get("period", "all")
+        project_name = body.get("projectName", "").strip()
 
         _period_days = {"7d": 7, "30d": 30, "90d": 90}
         cutoff = (
@@ -298,15 +299,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if tg_token and tg_chat:
             icon    = "🟢" if metrics["predictabilityPercent"] >= 80 else ("🟡" if metrics["predictabilityPercent"] >= 60 else "🔴")
             date    = datetime.now().strftime("%-d %b %Y")
-            tg_text = "\n".join([
-                f"📊 Delivery Report — {date}", "",
-                "━━━ Overview ━━━",
-                f"✅ Completed: {metrics['completedCount']}   🔄 In Progress: {metrics['inProgressCount']}   📋 Backlog: {metrics['backlogSize']}",
-                f"{icon} Predictability: {metrics['predictabilityPercent']}%",
-                f"⏱ Cycle Time: {metrics['cycleTimeDays']}d   📅 Lead Time: {metrics['leadTimeDays']}d   🚀 Throughput: {metrics['throughput']}",
-                "", "━━━ AI Analysis ━━━",
-                analysis,
-            ])
+            title   = project_name if project_name else "Delivery Report"
+            period_str = {"7d": "7 дней", "30d": "30 дней", "90d": "90 дней"}.get(period, "всё время")
+            reopened_line = f"⚠️ Reopened: {metrics['reopenedCount']}\n" if metrics["reopenedCount"] else ""
+            tg_text = "\n".join(filter(None, [
+                f"📊 {title} — {date}",
+                f"Период: {period_str}",
+                "",
+                "━━━ Метрики ━━━",
+                f"✅ Завершено: {metrics['completedCount']}   🔄 В работе: {metrics['inProgressCount']}   📋 Бэклог: {metrics['backlogSize']}",
+                f"⚠️ Переоткрыто: {metrics['reopenedCount']}" if metrics["reopenedCount"] else None,
+                f"{icon} Предсказуемость: {metrics['predictabilityPercent']}%",
+                f"⏱ Cycle Time: {metrics['cycleTimeDays']}д   📅 Lead Time: {metrics['leadTimeDays']}д   🚀 Throughput: {metrics['throughput']}",
+                "",
+                "━━━ AI-анализ ━━━",
+                analysis or "—",
+            ]))
             send_telegram(tg_text, tg_token, tg_chat)
 
         return {

@@ -791,7 +791,7 @@
 
       const savedPeriod = LS.load(LS.KEYS.period, "30d");
       activePeriod = savedPeriod;
-      document.querySelectorAll(".period-btn").forEach(b =>
+      document.querySelectorAll("#period-picker .period-btn").forEach(b =>
         b.classList.toggle("active", b.dataset.period === savedPeriod)
       );
 
@@ -1004,11 +1004,12 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            baseUrl:  jiraBaseUrlInput.value.trim(),
-            email:    jiraEmailInput.value.trim(),
-            apiToken: jiraTokenInput.value.trim(),
-            jql:      jiraJqlInput.value.trim(),
-            period:   activePeriod
+            baseUrl:      jiraBaseUrlInput.value.trim(),
+            email:        jiraEmailInput.value.trim(),
+            apiToken:     jiraTokenInput.value.trim(),
+            jql:          jiraJqlInput.value.trim(),
+            period:       activePeriod,
+            projectName:  active()?.label || "",
           })
         });
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -1093,10 +1094,10 @@
       if (p) { p.jql = jiraJqlInput.value; LS.saveState(); }
     });
 
-    document.querySelectorAll(".period-btn").forEach(btn => {
+    document.querySelectorAll("#period-picker .period-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         activePeriod = btn.dataset.period;
-        document.querySelectorAll(".period-btn").forEach(b =>
+        document.querySelectorAll("#period-picker .period-btn").forEach(b =>
           b.classList.toggle("active", b === btn)
         );
         LS.saveState();
