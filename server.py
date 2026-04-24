@@ -17,8 +17,8 @@ from datetime import datetime, timezone, timedelta
 PORT = 5678
 PATH = "/webhook/sync-report"
 
-STARTED = {"In Progress", "Selected for Development", "В работе", "In Development"}
-DONE    = {"Done", "Closed", "Resolved", "Выполнено", "Complete"}
+STARTED = {"in progress", "selected for development", "в работе", "in development"}
+DONE    = {"done", "closed", "resolved", "выполнено", "complete"}
 
 
 # ── Metrics ────────────────────────────────────────────────────────────────────
@@ -41,14 +41,14 @@ def calculate_metrics(issues, cutoff=None):
             key=lambda t: t["date"]
         )
 
-        started   = next((t for t in transitions if t["to"] in STARTED), None)
-        last_done = next((t for t in reversed(transitions) if t["to"] in DONE), None)
+        started   = next((t for t in transitions if t["to"].lower() in STARTED), None)
+        last_done = next((t for t in reversed(transitions) if t["to"].lower() in DONE), None)
         status    = (issue.get("fields") or {}).get("status", {}).get("name", "")
-        is_done   = status in DONE
+        is_done   = status.lower() in DONE
         resolved  = None
         if is_done:
             resolved = (issue.get("fields") or {}).get("resolutiondate") or (last_done["date"] if last_done else None)
-        reopened = any(t["from"] in DONE and t["to"] not in DONE for t in transitions)
+        reopened = any(t["from"].lower() in DONE and t["to"].lower() not in DONE for t in transitions)
 
         mapped.append({
             "started_at":  started["date"] if started else None,
@@ -80,8 +80,8 @@ def calculate_metrics(issues, cutoff=None):
                     d  = (db - da).total_seconds() / 86400
                     if d >= 0:
                         ds.append(d)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"  [warn] avg_days: cannot parse {item.get(a)!r} / {item.get(b)!r} → {e}")
         return round(sum(ds) / len(ds), 1) if ds else 0
 
     return {
@@ -140,7 +140,7 @@ def fetch_jira(base_url, email, api_token, jql):
     needs_changelog = [
         i["key"] for i in all_issues
         if i.get("fields", {}).get("resolutiondate")
-        or i.get("fields", {}).get("status", {}).get("name", "") in STARTED
+        or i.get("fields", {}).get("status", {}).get("name", "").lower() in STARTED
     ]
     changelogs = {}
     for key in needs_changelog:
