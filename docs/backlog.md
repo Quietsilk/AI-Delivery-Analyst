@@ -31,10 +31,19 @@
 
 - [x] Jira pagination (PAGE_SIZE=50, isLast loop)
 - [x] Period-фильтр (7d/30d/90d/all), server-side cutoff
-- [x] Changelog fetch только для resolved + in-progress (не backlog)
+- [x] Changelog fetch для всех задач (покрывает Done без resolutiondate и In Progress → Backlog)
 - [x] Case-insensitive статусная модель
 - [x] localStorage-персистентность (credentials, projects, history, period)
 - [x] Smart Telegram chunking (split по \n / пробел / hard cut)
 - [x] aiEnabled флаг в ответе (честный placeholder при отсутствии ключа)
-- [x] Regression suite: 33 теста, stdlib unittest, zero deps
+- [x] Regression suite: 37 тестов, stdlib unittest, zero deps
 - [x] Архитектурный pivot: TypeScript → Python
+- [x] Переименование Predictability → Done Rate (корректное определение метрики)
+- [x] Throughput с меткой периода (15 / 30d) в UI и Telegram
+- [x] KPI-карточка Reopened в дашборде (красная при > 0)
+- [x] График тренда Throughput рядом с Cycle Time
+- [x] BUG-1: Done без resolutiondate корректно попадает в Throughput
+- [x] BUG-2: Cycle Time от последнего старта перед done, не от первого
+- [x] BUG-3: Reopened фильтруется по периоду (только среди completed)
+- [x] BUG-4: Задачи In Progress → Backlog видимы (changelog фетчится для всех)
+- [x] BUG-5: Удалён дублирующий completedCount, оставлен throughput

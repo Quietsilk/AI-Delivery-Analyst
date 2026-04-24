@@ -34,8 +34,8 @@ Python 3.9+ · stdlib only (http.server, urllib, json) · Jira Cloud REST API ·
 
 | Функция | Что делает |
 |---|---|
-| `fetch_jira()` | Пагинация (`PAGE_SIZE=50`), отдельный changelog для resolved + in-progress |
-| `calculate_metrics(issues, cutoff)` | Cycle Time, Lead Time, Throughput, Predictability, Backlog, WIP, Reopened |
+| `fetch_jira()` | Пагинация (`PAGE_SIZE=50`), changelog fetch для **всех** задач параллельно (10 потоков) |
+| `calculate_metrics(issues, cutoff)` | Cycle Time (от последнего старта), Lead Time, Throughput, Done Rate, Backlog, WIP, Reopened (только среди completed) |
 | `_parse_dt(s)` | ISO 8601 → datetime, обрабатывает Z и +00:00 |
 | `call_openai(metrics, api_key, period_label)` | OpenAI Responses API, o4-mini |
 | `send_telegram(text, token, chat_id)` | Умный split по `\n` / ` ` / hard cut |
@@ -97,3 +97,14 @@ python3 -m unittest tests/test_server.py
 7. Case-insensitive статусы (BUG-S01)
 8. Smart Telegram chunking (BUG-S04 port)
 9. Regression suite (33 тестов)
+10. Исправление метрик и UX (ТЗ 24.04.2026):
+    - Predictability → Done Rate (корректное определение)
+    - Throughput с меткой периода ("15 / 30d")
+    - KPI-карточка Reopened с красной подсветкой
+    - График тренда Throughput рядом с Cycle Time
+    - BUG-1: Done без resolutiondate → Throughput
+    - BUG-2: Cycle Time от последнего старта
+    - BUG-3: Reopened фильтруется по периоду
+    - BUG-4: changelog для всех задач
+    - BUG-5: удалён completedCount-дубль
+    - Regression suite расширен до 37 тестов

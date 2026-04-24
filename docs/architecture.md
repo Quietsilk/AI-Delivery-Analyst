@@ -17,11 +17,11 @@ server.py (Python stdlib HTTP)
     │               (только для resolved + in-progress задач)
     │
     ├── calculate_metrics(issues, cutoff)
-    │       ├── Cycle Time (started_at → resolved_at)
+    │       ├── Cycle Time (последний started_at → resolved_at)
     │       ├── Lead Time  (created_at → resolved_at)
     │       ├── Throughput (кол-во resolved за период)
-    │       ├── Predictability (resolved / total)
-    │       └── Backlog / WIP / Reopened counts
+    │       ├── Done Rate  (resolved / total × 100%)
+    │       └── Backlog / WIP / Reopened counts (Reopened — только среди completed)
     │
     ├── call_openai()          [опционально]
     │       └── POST /v1/responses (o4-mini, reasoning medium)
@@ -56,7 +56,7 @@ Jira Raw Issue
             │
             ▼
     Mapped Issue (dict)
-            started_at   ← первый переход в STARTED
+            started_at   ← последний переход в STARTED перед last_done
             resolved_at  ← resolutiondate или последний переход в DONE
             created_at   ← fields.created
             reopened     ← был ли переход DONE → не-DONE
@@ -64,8 +64,8 @@ Jira Raw Issue
             ▼ (+ cutoff filter)
     Metrics dict
             cycleTimeDays, leadTimeDays, throughput,
-            predictabilityPercent, backlogSize,
-            inProgressCount, completedCount, reopenedCount
+            doneRatePercent, backlogSize,
+            inProgressCount, reopenedCount (только среди completed)
 ```
 
 ---
@@ -79,7 +79,7 @@ STARTED = {"in progress", "selected for development", "в работе", "in dev
 DONE    = {"done", "closed", "resolved", "выполнено", "complete"}
 ```
 
-Changelog запрашивается только для задач, у которых `resolutiondate` заполнен **или** текущий статус входит в STARTED. Backlog-задачи пропускаются.
+Changelog запрашивается для **всех** задач. Это необходимо для корректного определения задач в Done без `resolutiondate` (BUG-1) и задач, вернувшихся из In Progress в Backlog (BUG-4).
 
 ---
 
@@ -97,7 +97,7 @@ Changelog запрашивается только для задач, у кото
 | `ada:projects` | JSON: массив проектных табов |
 | `ada:activeId` | ID активного проекта |
 | `ada:period` | Активный period-фильтр |
-| `ada:runHistory` | JSON: последние 30 синков (ts + cycleTimeDays) |
+| `ada:runHistory` | JSON: последние 30 синков (ts + cycleTimeDays + throughput) |
 
 ---
 

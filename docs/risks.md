@@ -20,3 +20,8 @@
 ~~n8n как точка отказа~~ — n8n удалён, сервер самодостаточен.
 ~~Hard cut Telegram-сообщений~~ — реализован умный чанкинг.
 ~~Case-sensitive статусы (BUG-S01)~~ — исправлено, все сравнения через `.lower()`.
+~~BUG-1: Done без resolutiondate не попадает в Throughput~~ — changelog фетчится для всех задач.
+~~BUG-2: Cycle Time от первого старта~~ — исправлено, берётся последний STARTED перед done.
+~~BUG-3: Reopened не фильтруется по периоду~~ — считается только среди completed.
+~~BUG-4: Задачи In Progress → Backlog невидимы~~ — changelog фетчится для всех задач.
+~~BUG-5: completedCount дублирует throughput~~ — completedCount удалён.

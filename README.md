@@ -8,7 +8,7 @@
 
 1. Получает задачи из Jira по JQL-запросу (cursor-based пагинация)
 2. Параллельно загружает changelog для каждой задачи (до 10 потоков)
-3. Вычисляет delivery-метрики: Cycle Time, Lead Time, Throughput, Predictability
+3. Вычисляет delivery-метрики: Cycle Time, Lead Time, Throughput, Done Rate, Reopened
 4. Фильтрует завершённые задачи по периоду (7d / 30d / 90d / All)
 5. Анализирует метрики через OpenAI → Summary, Risks, Actions
 6. Отправляет отчёт в Telegram (умный чанкинг ≤4096 символов)
@@ -83,10 +83,11 @@ Jira credentials вводятся в UI и не хранятся на серве
 
 | Метрика | Определение |
 |---|---|
-| **Cycle Time** | Среднее время от первого перехода в "In Progress" до завершения |
+| **Cycle Time** | Среднее время от последнего перехода в "In Progress" до завершения |
 | **Lead Time** | Среднее время от создания задачи до завершения |
-| **Throughput** | Количество завершённых задач за выбранный период |
-| **Predictability** | Завершённые / все задачи в выборке × 100% |
+| **Throughput** | Количество завершённых задач за выбранный период (отображается с меткой: "15 / 30d") |
+| **Done Rate** | Завершённые / все задачи в выборке × 100% |
+| **Reopened** | Количество завершённых задач, которые ранее возвращались из Done |
 
 Определение статусов (case-insensitive):
 
@@ -138,14 +139,14 @@ In Progress и Backlog всегда отражают актуальное сос
 python3 -m unittest tests/test_server.py -v
 ```
 
-33 теста без внешних зависимостей. Покрытие:
+37 тестов без внешних зависимостей. Покрытие:
 
 | Группа | Тестов |
 |---|---|
-| `calculate_metrics` — пустой список, completed, WIP, backlog, cutoff, reopened, cycle/lead time | 11 |
+| `calculate_metrics` — пустой список, completed, WIP, backlog, cutoff, reopened, cycle/lead time, BUG-1/2/3 | 14 |
 | `_split_telegram` — короткий текст, split по newline/space, hard cut, пустые чанки | 7 |
 | `fetch_jira` — одна страница, cursor pagination, остановка по размеру страницы | 3 |
-| HTTP-интеграция — GET, 404, CORS, POST pipeline, 500 на ошибке Jira, period=7d | 7 |
+| HTTP-интеграция — GET, 404, CORS, POST pipeline, 500 на ошибке Jira, period=7d, throughputPeriodLabel | 8 |
 | `_parse_dt` — форматы Z, +00:00, +HH:MM | 3 |
 | `load_env` — загрузка файла, отсутствующий файл | 2 |
 
