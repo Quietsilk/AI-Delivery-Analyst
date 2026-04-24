@@ -3,7 +3,7 @@
 
 POST http://localhost:5678/webhook/sync-report
 Body: { baseUrl, email, apiToken, jql }
-Returns: { ok, dashboard: { predictabilityPercent, cycleTimeDays, throughput, leadTimeDays, analysis } }
+Returns: { ok, dashboard: { doneRatePercent, cycleTimeDays, throughput, throughputPeriodLabel, leadTimeDays, reopenedCount, analysis } }
 """
 
 import json
@@ -48,8 +48,10 @@ def calculate_metrics(issues, cutoff=None):
             key=lambda t: t["date"]
         )
 
-        started   = next((t for t in transitions if t["to"].lower() in STARTED), None)
         last_done = next((t for t in reversed(transitions) if t["to"].lower() in DONE), None)
+        started   = next((t for t in reversed(transitions)
+                          if t["to"].lower() in STARTED
+                          and (not last_done or t["date"] <= last_done["date"])), None)
         status    = (issue.get("fields") or {}).get("status", {}).get("name", "")
         is_done   = status.lower() in DONE
         resolved  = None
@@ -92,14 +94,13 @@ def calculate_metrics(issues, cutoff=None):
         return round(sum(ds) / len(ds), 1) if ds else 0
 
     return {
-        "cycleTimeDays":         avg_days(completed, "started_at", "resolved_at"),
-        "leadTimeDays":          avg_days(completed, "created_at", "resolved_at"),
-        "throughput":            len(completed),
-        "predictabilityPercent": round(len(completed) / len(mapped) * 100, 1) if mapped else 0,
-        "backlogSize":           len(backlog),
-        "inProgressCount":       len(in_progress),
-        "completedCount":        len(completed),
-        "reopenedCount":         sum(1 for i in mapped if i["reopened"]),
+        "cycleTimeDays":  avg_days(completed, "started_at", "resolved_at"),
+        "leadTimeDays":   avg_days(completed, "created_at", "resolved_at"),
+        "throughput":     len(completed),
+        "doneRatePercent": round(len(completed) / len(mapped) * 100, 1) if mapped else 0,
+        "backlogSize":    len(backlog),
+        "inProgressCount": len(in_progress),
+        "reopenedCount":  sum(1 for i in completed if i["reopened"]),
     }
 
 
@@ -146,13 +147,10 @@ def fetch_jira(base_url, email, api_token, jql):
         if data.get("isLast", True) or not next_page_token or len(page) < PAGE_SIZE:
             break
 
-    # ── Fetch changelog for resolved + actively in-progress issues ─
-    # Backlog items (never started) don't need changelog.
-    needs_changelog = [
-        i["key"] for i in all_issues
-        if i.get("fields", {}).get("resolutiondate")
-        or i.get("fields", {}).get("status", {}).get("name", "").lower() in STARTED
-    ]
+    # ── Fetch changelog for all issues ────────────────────────────
+    # Needed for Done-without-resolutiondate (BUG-1) and tasks
+    # returned from In Progress to Backlog (BUG-4).
+    needs_changelog = [i["key"] for i in all_issues]
     print(f"  Fetching changelogs for {len(needs_changelog)} issues (parallel)…")
 
     def fetch_changelog(key):
@@ -183,7 +181,7 @@ def call_openai(metrics, api_key, period_label="all time"):
         f"- Cycle Time: {m['cycleTimeDays']}d\n"
         f"- Lead Time: {m['leadTimeDays']}d\n"
         f"- Throughput: {m['throughput']} issues\n"
-        f"- Predictability: {m['predictabilityPercent']}%\n"
+        f"- Done Rate: {m['doneRatePercent']}%\n"
         f"- Backlog: {m['backlogSize']} | In Progress: {m['inProgressCount']} | Reopened: {m['reopenedCount']}\n\n"
         "Identify risks, explain causes, suggest 3 specific actions. No generic advice.\n\n"
         "Return:\nSummary: 1-2 sentences\nRisks:\n- ...\nActions:\n- ..."
@@ -335,36 +333,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 print(f"OpenAI error: {e}")
 
         if tg_token and tg_chat:
-            icon    = "🟢" if metrics["predictabilityPercent"] >= 80 else ("🟡" if metrics["predictabilityPercent"] >= 60 else "🔴")
-            date    = datetime.now().strftime("%-d %b %Y")
-            title   = project_name if project_name else "Delivery Report"
+            icon       = "🟢" if metrics["doneRatePercent"] >= 80 else ("🟡" if metrics["doneRatePercent"] >= 60 else "🔴")
+            date       = datetime.now().strftime("%-d %b %Y")
+            title      = project_name if project_name else "Delivery Report"
             period_str = {"7d": "7 дней", "30d": "30 дней", "90d": "90 дней"}.get(period, "всё время")
-            reopened_line = f"⚠️ Reopened: {metrics['reopenedCount']}\n" if metrics["reopenedCount"] else ""
             tg_text = "\n".join(filter(None, [
                 f"📊 {title} — {date}",
                 f"Период: {period_str}",
                 "",
                 "━━━ Метрики ━━━",
-                f"✅ Завершено: {metrics['completedCount']}   🔄 В работе: {metrics['inProgressCount']}   📋 Бэклог: {metrics['backlogSize']}",
+                f"✅ Завершено: {metrics['throughput']}   🔄 В работе: {metrics['inProgressCount']}   📋 Бэклог: {metrics['backlogSize']}",
                 f"⚠️ Переоткрыто: {metrics['reopenedCount']}" if metrics["reopenedCount"] else None,
-                f"{icon} Предсказуемость: {metrics['predictabilityPercent']}%",
-                f"⏱ Cycle Time: {metrics['cycleTimeDays']}д   📅 Lead Time: {metrics['leadTimeDays']}д   🚀 Throughput: {metrics['throughput']}",
+                f"{icon} Done Rate: {metrics['doneRatePercent']}%",
+                f"⏱ Cycle Time: {metrics['cycleTimeDays']}д   📅 Lead Time: {metrics['leadTimeDays']}д   🚀 Throughput: {metrics['throughput']} за {period_str}",
                 "",
                 "━━━ AI-анализ ━━━",
                 analysis or "—",
             ]))
             send_telegram(tg_text, tg_token, tg_chat)
 
+        throughput_label = period if period != "all" else "all"
         return {
             "ok": True,
             "dashboard": {
-                "predictabilityPercent": metrics["predictabilityPercent"],
-                "cycleTimeDays":         metrics["cycleTimeDays"],
-                "throughput":            metrics["throughput"],
-                "leadTimeDays":          metrics["leadTimeDays"],
-                "analysis":              analysis,
-                "aiEnabled":             bool(openai_key),
-                "aiError":               ai_error,
+                "doneRatePercent":      metrics["doneRatePercent"],
+                "cycleTimeDays":        metrics["cycleTimeDays"],
+                "throughput":           metrics["throughput"],
+                "throughputPeriodLabel": throughput_label,
+                "leadTimeDays":         metrics["leadTimeDays"],
+                "reopenedCount":        metrics["reopenedCount"],
+                "analysis":             analysis,
+                "aiEnabled":            bool(openai_key),
+                "aiError":              ai_error,
             },
         }
 

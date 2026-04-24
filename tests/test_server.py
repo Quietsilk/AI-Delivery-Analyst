@@ -68,12 +68,11 @@ class TestCalculateMetrics(unittest.TestCase):
     def test_empty(self):
         m = server.calculate_metrics([])
         self.assertEqual(m["throughput"], 0)
-        self.assertEqual(m["predictabilityPercent"], 0)
+        self.assertEqual(m["doneRatePercent"], 0)
         self.assertEqual(m["cycleTimeDays"], 0)
         self.assertEqual(m["leadTimeDays"], 0)
         self.assertEqual(m["backlogSize"], 0)
         self.assertEqual(m["inProgressCount"], 0)
-        self.assertEqual(m["completedCount"], 0)
         self.assertEqual(m["reopenedCount"], 0)
 
     def test_single_completed_issue(self):
@@ -87,9 +86,8 @@ class TestCalculateMetrics(unittest.TestCase):
             ],
         )
         m = server.calculate_metrics([issue])
-        self.assertEqual(m["completedCount"], 1)
         self.assertEqual(m["throughput"], 1)
-        self.assertEqual(m["predictabilityPercent"], 100.0)
+        self.assertEqual(m["doneRatePercent"], 100.0)
         self.assertEqual(m["cycleTimeDays"], 3.0)   # Jan 2 → Jan 5
         self.assertEqual(m["leadTimeDays"], 4.0)    # Jan 1 → Jan 5
         self.assertEqual(m["reopenedCount"], 0)
@@ -103,7 +101,6 @@ class TestCalculateMetrics(unittest.TestCase):
             ],
         )
         m = server.calculate_metrics([issue])
-        self.assertEqual(m["completedCount"], 0)
         self.assertEqual(m["inProgressCount"], 1)
         self.assertEqual(m["backlogSize"], 0)
         self.assertEqual(m["throughput"], 0)
@@ -113,21 +110,37 @@ class TestCalculateMetrics(unittest.TestCase):
         m = server.calculate_metrics([issue])
         self.assertEqual(m["backlogSize"], 1)
         self.assertEqual(m["inProgressCount"], 0)
-        self.assertEqual(m["completedCount"], 0)
+        self.assertEqual(m["throughput"], 0)
 
-    def test_reopened_detection(self):
-        issue = make_issue(
+    def test_reopened_counted_only_for_completed(self):
+        # In Progress issue that was reopened — NOT counted (BUG-3 fix)
+        wip = make_issue(
             status="In Progress",
             created="2024-01-01T00:00:00Z",
             transitions=[
-                {"date": "2024-01-02T00:00:00Z", "from": "To Do",      "to": "In Progress"},
+                {"date": "2024-01-02T00:00:00Z", "from": "To Do",       "to": "In Progress"},
                 {"date": "2024-01-03T00:00:00Z", "from": "In Progress", "to": "Done"},
-                {"date": "2024-01-04T00:00:00Z", "from": "Done",       "to": "In Progress"},
+                {"date": "2024-01-04T00:00:00Z", "from": "Done",        "to": "In Progress"},
             ],
         )
-        m = server.calculate_metrics([issue])
+        m = server.calculate_metrics([wip])
+        self.assertEqual(m["reopenedCount"], 0)   # not in completed → not counted
+
+    def test_reopened_counted_for_completed_in_period(self):
+        # Done issue that was reopened — IS counted
+        done = make_issue(
+            status="Done",
+            created="2024-01-01T00:00:00Z",
+            resolutiondate="2024-01-06T00:00:00Z",
+            transitions=[
+                {"date": "2024-01-02T00:00:00Z", "from": "To Do",       "to": "In Progress"},
+                {"date": "2024-01-03T00:00:00Z", "from": "In Progress", "to": "Done"},
+                {"date": "2024-01-04T00:00:00Z", "from": "Done",        "to": "In Progress"},
+                {"date": "2024-01-06T00:00:00Z", "from": "In Progress", "to": "Done"},
+            ],
+        )
+        m = server.calculate_metrics([done])
         self.assertEqual(m["reopenedCount"], 1)
-        self.assertEqual(m["completedCount"], 0)   # not done currently
 
     def test_cutoff_filters_old_completed(self):
         old_issue = make_issue(
@@ -141,7 +154,6 @@ class TestCalculateMetrics(unittest.TestCase):
         )
         cutoff = datetime(2024, 1, 1, tzinfo=timezone.utc)
         m = server.calculate_metrics([old_issue], cutoff=cutoff)
-        self.assertEqual(m["completedCount"], 0)
         self.assertEqual(m["throughput"], 0)
 
     def test_cutoff_keeps_recent_completed(self):
@@ -156,7 +168,7 @@ class TestCalculateMetrics(unittest.TestCase):
         )
         cutoff = datetime(2024, 1, 1, tzinfo=timezone.utc)
         m = server.calculate_metrics([issue], cutoff=cutoff)
-        self.assertEqual(m["completedCount"], 1)
+        self.assertEqual(m["throughput"], 1)
 
     def test_mixed_issues(self):
         done = make_issue(
@@ -177,12 +189,12 @@ class TestCalculateMetrics(unittest.TestCase):
         )
         backlog = make_issue(key="T-3", status="To Do", created="2024-01-06T00:00:00Z")
         m = server.calculate_metrics([done, wip, backlog])
-        self.assertEqual(m["completedCount"], 1)
+        self.assertEqual(m["throughput"], 1)
         self.assertEqual(m["inProgressCount"], 1)
         self.assertEqual(m["backlogSize"], 1)
-        self.assertAlmostEqual(m["predictabilityPercent"], 33.3)
+        self.assertAlmostEqual(m["doneRatePercent"], 33.3)
 
-    def test_predictability_all_done(self):
+    def test_done_rate_all_done(self):
         issues = [
             make_issue(
                 key=f"T-{i}", status="Done",
@@ -196,8 +208,8 @@ class TestCalculateMetrics(unittest.TestCase):
             for i in range(5)
         ]
         m = server.calculate_metrics(issues)
-        self.assertEqual(m["predictabilityPercent"], 100.0)
-        self.assertEqual(m["completedCount"], 5)
+        self.assertEqual(m["doneRatePercent"], 100.0)
+        self.assertEqual(m["throughput"], 5)
 
     def test_issue_without_started_transition_has_zero_cycle_time(self):
         issue = make_issue(
@@ -224,7 +236,43 @@ class TestCalculateMetrics(unittest.TestCase):
                 ],
             )
             m = server.calculate_metrics([issue])
-            self.assertEqual(m["completedCount"], 1, f"Expected Done-like for status={status}")
+            self.assertEqual(m["throughput"], 1, f"Expected Done-like for status={status}")
+
+    # ── BUG-1: Done without resolutiondate counts in throughput ────────────────
+
+    def test_done_without_resolutiondate_counts_in_throughput(self):
+        issue = make_issue(
+            status="Done",
+            created="2024-01-01T00:00:00Z",
+            resolutiondate=None,  # no resolutiondate — common Jira config
+            transitions=[
+                {"date": "2024-01-02T00:00:00Z", "from": "To Do",       "to": "In Progress"},
+                {"date": "2024-01-05T00:00:00Z", "from": "In Progress", "to": "Done"},
+            ],
+        )
+        m = server.calculate_metrics([issue])
+        self.assertEqual(m["throughput"], 1)
+        self.assertEqual(m["cycleTimeDays"], 3.0)
+
+    # ── BUG-2: Cycle Time from last STARTED before done, not first ─────────────
+
+    def test_cycle_time_from_last_started(self):
+        # Task: To Do → In Progress → Backlog → In Progress → Done
+        # First start: Jan 2, last start: Jan 6, done: Jan 10
+        # Correct cycle time: Jan 6 → Jan 10 = 4d (not Jan 2 → Jan 10 = 8d)
+        issue = make_issue(
+            status="Done",
+            created="2024-01-01T00:00:00Z",
+            resolutiondate="2024-01-10T00:00:00Z",
+            transitions=[
+                {"date": "2024-01-02T00:00:00Z", "from": "To Do",       "to": "In Progress"},
+                {"date": "2024-01-04T00:00:00Z", "from": "In Progress", "to": "To Do"},
+                {"date": "2024-01-06T00:00:00Z", "from": "To Do",       "to": "In Progress"},
+                {"date": "2024-01-10T00:00:00Z", "from": "In Progress", "to": "Done"},
+            ],
+        )
+        m = server.calculate_metrics([issue])
+        self.assertEqual(m["cycleTimeDays"], 4.0)
 
 
 # ── _split_telegram ────────────────────────────────────────────────────────────
@@ -402,7 +450,7 @@ class TestHttpIntegration(unittest.TestCase):
 
         self.assertTrue(body["ok"])
         self.assertEqual(body["dashboard"]["throughput"], 1)
-        self.assertEqual(body["dashboard"]["predictabilityPercent"], 100.0)
+        self.assertEqual(body["dashboard"]["doneRatePercent"], 100.0)
         self.assertFalse(body["dashboard"]["aiEnabled"])
 
     def test_post_returns_500_on_jira_error(self):
@@ -461,6 +509,36 @@ class TestHttpIntegration(unittest.TestCase):
             with urllib.request.urlopen(req) as r:
                 body = json.loads(r.read())
         self.assertEqual(body["dashboard"]["throughput"], 0)
+
+    def test_response_includes_throughput_period_label(self):
+        mock_issues = [
+            make_issue(
+                key="T-1", status="Done",
+                created="2024-01-01T00:00:00Z",
+                resolutiondate="2024-01-05T00:00:00Z",
+                transitions=[
+                    {"date": "2024-01-02T00:00:00Z", "from": "To Do", "to": "In Progress"},
+                    {"date": "2024-01-05T00:00:00Z", "from": "In Progress", "to": "Done"},
+                ],
+            )
+        ]
+        with patch("server.fetch_jira", return_value={"issues": mock_issues}), \
+             patch.dict(os.environ, {"OPENAI_API_KEY": "", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}):
+            payload = json.dumps({
+                "baseUrl": "https://jira.test",
+                "email": "u", "apiToken": "t", "jql": "project = X",
+                "period": "30d",
+            }).encode()
+            req = urllib.request.Request(
+                self._url("/webhook/sync-report"),
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as r:
+                body = json.loads(r.read())
+        self.assertEqual(body["dashboard"]["throughputPeriodLabel"], "30d")
+        self.assertIn("reopenedCount", body["dashboard"])
 
 
 # ── load_env ───────────────────────────────────────────────────────────────────

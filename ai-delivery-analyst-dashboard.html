@@ -351,7 +351,7 @@
     .sync-dismiss:hover { opacity: 1; }
 
     /* KPI row */
-    .kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+    .kpi-row { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
 
     .kpi-card {
       background: var(--card);
@@ -443,15 +443,17 @@
     .footnote { text-align: center; color: var(--muted); font-size: 0.7rem; padding: 6px 0 2px; }
 
     /* Responsive */
+    .kpi-card.kpi-warn { border-color: rgba(255,107,107,0.4); }
+
     @media (max-width: 900px) {
       .app-body { grid-template-columns: 1fr; }
       .sidebar  { border-right: none; border-bottom: 1px solid var(--border); }
-      .kpi-row  { grid-template-columns: repeat(2,1fr); }
+      .kpi-row  { grid-template-columns: repeat(3,1fr); }
       .two-col  { grid-template-columns: 1fr; }
       .actions-list { columns: 1; }
     }
     @media (max-width: 520px) {
-      .kpi-row { grid-template-columns: 1fr; }
+      .kpi-row { grid-template-columns: repeat(2,1fr); }
     }
   </style>
 </head>
@@ -537,11 +539,11 @@
 
         <!-- KPI row -->
         <div class="kpi-row">
-          <div class="kpi-card" id="kpi-predictability-card">
-            <div class="kpi-label">Predictability</div>
+          <div class="kpi-card" id="kpi-done-rate-card">
+            <div class="kpi-label">Done Rate</div>
             <div class="kpi-bottom">
-              <span class="kpi-value" id="kpi-predictability-value">—</span>
-              <span class="kpi-delta" id="kpi-predictability-delta"></span>
+              <span class="kpi-value" id="kpi-done-rate-value">—</span>
+              <span class="kpi-delta" id="kpi-done-rate-delta"></span>
             </div>
           </div>
           <div class="kpi-card" id="kpi-cycle-time-card">
@@ -563,6 +565,13 @@
             <div class="kpi-bottom">
               <span class="kpi-value" id="kpi-lead-time-value">—</span>
               <span class="kpi-delta" id="kpi-lead-time-delta"></span>
+            </div>
+          </div>
+          <div class="kpi-card" id="kpi-reopened-card">
+            <div class="kpi-label">Reopened ⚠️</div>
+            <div class="kpi-bottom">
+              <span class="kpi-value" id="kpi-reopened-value">—</span>
+              <span class="kpi-delta" id="kpi-reopened-delta"></span>
             </div>
           </div>
         </div>
@@ -588,22 +597,41 @@
         </div>
 
 
-        <!-- Chart -->
-        <div class="chart-panel">
-          <div class="chart-header">
-            <span class="chart-title">Cycle Time Trend — last 14 days</span>
-            <span class="chart-caption">days / task</span>
+        <!-- Charts -->
+        <div class="two-col">
+          <div class="chart-panel">
+            <div class="chart-header">
+              <span class="chart-title">Cycle Time Trend</span>
+              <span class="chart-caption">days / task</span>
+            </div>
+            <div class="chart-wrap">
+              <svg viewBox="0 0 980 205" preserveAspectRatio="none" role="img" aria-label="Cycle time trend chart">
+                <defs>
+                  <linearGradient id="grad-ct" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#5b9cf6" stop-opacity="0.22"/>
+                    <stop offset="100%" stop-color="#5b9cf6" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <g id="chart-content"></g>
+              </svg>
+            </div>
           </div>
-          <div class="chart-wrap">
-            <svg viewBox="0 0 980 205" preserveAspectRatio="none" role="img" aria-label="Cycle time trend chart">
-              <defs>
-                <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#5b9cf6" stop-opacity="0.22"/>
-                  <stop offset="100%" stop-color="#5b9cf6" stop-opacity="0"/>
-                </linearGradient>
-              </defs>
-              <g id="chart-content"></g>
-            </svg>
+          <div class="chart-panel">
+            <div class="chart-header">
+              <span class="chart-title">Throughput Trend</span>
+              <span class="chart-caption">tasks / sync</span>
+            </div>
+            <div class="chart-wrap">
+              <svg viewBox="0 0 980 205" preserveAspectRatio="none" role="img" aria-label="Throughput trend chart">
+                <defs>
+                  <linearGradient id="grad-tp" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#3ecf8e" stop-opacity="0.22"/>
+                    <stop offset="100%" stop-color="#3ecf8e" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <g id="chart-throughput-content"></g>
+              </svg>
+            </div>
           </div>
         </div>
 
@@ -770,7 +798,7 @@
         this.save(this.KEYS.projects, projects);
         this.save(this.KEYS.activeId, activeId);
         this.save(this.KEYS.period,   activePeriod);
-        this.save(this.KEYS.history,  runHistory.slice(-30).map(r => ({ ts: r.ts, v: r.v })));
+        this.save(this.KEYS.history,  runHistory.slice(-30).map(r => ({ ts: r.ts, v: r.v, t: r.t ?? 0 })));
       },
     };
 
@@ -797,7 +825,7 @@
 
       const savedHistory = LS.load(LS.KEYS.history, []);
       if (Array.isArray(savedHistory) && savedHistory.length) {
-        runHistory = savedHistory.map(r => ({ ts: new Date(r.ts), v: r.v }));
+        runHistory = savedHistory.map(r => ({ ts: new Date(r.ts), v: r.v, t: r.t ?? 0 }));
       }
     }
 
@@ -893,8 +921,52 @@
 
       content.innerHTML =
         grid +
-        `<path d="${areaD}" fill="url(#grad)"/>` +
+        `<path d="${areaD}" fill="url(#grad-ct)"/>` +
         `<polyline fill="none" stroke="#5b9cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${linePts}"/>` +
+        dots + xLabels;
+    }
+
+    function drawThroughputChart() {
+      const content = document.getElementById("chart-throughput-content");
+      const pts = runHistory.filter(r => r.t != null);
+      if (pts.length === 0) {
+        content.innerHTML = '<text x="490" y="100" fill="rgba(255,255,255,0.2)" font-size="11" text-anchor="middle">Run a sync to see the trend</text>';
+        return;
+      }
+
+      const xL = 20, xR = 966, yT = 25, yB = 170;
+      const n = pts.length;
+      const maxV = Math.max(...pts.map(r => r.t)) * 1.25 || 1;
+
+      const px = i => xL + (i / Math.max(n - 1, 1)) * (xR - xL);
+      const py = v  => yB - (v / maxV) * (yB - yT);
+
+      const ptsArr = pts.map((r, i) => [px(i), py(r.t)]);
+      const linePts = ptsArr.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+      const areaD = `M${linePts.replace(/ /g, " L")} L${ptsArr[n-1][0].toFixed(1)},${yB} L${ptsArr[0][0].toFixed(1)},${yB} Z`;
+
+      const grid = [0.25, 0.5, 0.75, 1.0].map(f => {
+        const v = maxV * f, y = py(v);
+        return `<line x1="${xL}" y1="${y.toFixed(1)}" x2="${xR}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>` +
+               `<text x="0" y="${(y + 4).toFixed(1)}" fill="rgba(255,255,255,0.22)" font-size="9">${Math.round(v)}</text>`;
+      }).join("");
+
+      const dots = ptsArr.map(([x, y]) =>
+        `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#3ecf8e" stroke="#0d0f13" stroke-width="1.5"/>`
+      ).join("");
+
+      const fmt = ts => ts.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+      let xLabels = `<text x="${xL}" y="198" fill="rgba(255,255,255,0.2)" font-size="9">${fmt(pts[0].ts)}</text>`;
+      if (n > 1) xLabels += `<text x="${xR}" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="end">${fmt(pts[n-1].ts)}</text>`;
+      if (n > 2) {
+        const m = Math.floor(n / 2);
+        xLabels += `<text x="490" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="middle">${fmt(pts[m].ts)}</text>`;
+      }
+
+      content.innerHTML =
+        grid +
+        `<path d="${areaD}" fill="url(#grad-tp)"/>` +
+        `<polyline fill="none" stroke="#3ecf8e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${linePts}"/>` +
         dots + xLabels;
     }
 
@@ -912,7 +984,7 @@
 
     // ── Run ───────────────────────────────────────────────────
     function flashKpi() {
-      ["kpi-predictability-card","kpi-cycle-time-card","kpi-throughput-card","kpi-lead-time-card"]
+      ["kpi-done-rate-card","kpi-cycle-time-card","kpi-throughput-card","kpi-lead-time-card","kpi-reopened-card"]
         .forEach((id, i) => setTimeout(() => {
           const el = document.getElementById(id);
           el.classList.remove("flashing");
@@ -943,15 +1015,21 @@
     }
 
     function updateDashboard(d) {
-      document.getElementById("kpi-predictability-value").textContent = d.predictabilityPercent.toFixed(1) + "%";
-      document.getElementById("kpi-cycle-time-value").textContent     = d.cycleTimeDays.toFixed(1) + "d";
-      document.getElementById("kpi-throughput-value").textContent     = d.throughput;
-      document.getElementById("kpi-lead-time-value").textContent      = d.leadTimeDays.toFixed(1) + "d";
+      document.getElementById("kpi-done-rate-value").textContent  = (d.doneRatePercent ?? 0).toFixed(1) + "%";
+      document.getElementById("kpi-cycle-time-value").textContent = d.cycleTimeDays.toFixed(1) + "d";
+      document.getElementById("kpi-throughput-value").textContent = d.throughput + (d.throughputPeriodLabel ? " / " + d.throughputPeriodLabel : "");
+      document.getElementById("kpi-lead-time-value").textContent  = d.leadTimeDays.toFixed(1) + "d";
 
-      setDelta("kpi-predictability-delta", d.predictabilityPercent, prevKpi?.predictabilityPercent ?? null, false, "%");
-      setDelta("kpi-cycle-time-delta",     d.cycleTimeDays,         prevKpi?.cycleTimeDays ?? null,         true,  "d");
-      setDelta("kpi-throughput-delta",     d.throughput,            prevKpi?.throughput ?? null,            false, "");
-      setDelta("kpi-lead-time-delta",      d.leadTimeDays,          prevKpi?.leadTimeDays ?? null,          true,  "d");
+      const reopened = d.reopenedCount ?? 0;
+      document.getElementById("kpi-reopened-value").textContent = reopened;
+      const reopenedCard = document.getElementById("kpi-reopened-card");
+      reopenedCard.classList.toggle("kpi-warn", reopened > 0);
+
+      setDelta("kpi-done-rate-delta",  d.doneRatePercent ?? 0, prevKpi?.doneRatePercent ?? null, false, "%");
+      setDelta("kpi-cycle-time-delta", d.cycleTimeDays,        prevKpi?.cycleTimeDays ?? null,   true,  "d");
+      setDelta("kpi-throughput-delta", d.throughput,           prevKpi?.throughput ?? null,       false, "");
+      setDelta("kpi-lead-time-delta",  d.leadTimeDays,         prevKpi?.leadTimeDays ?? null,     true,  "d");
+      setDelta("kpi-reopened-delta",   reopened,               prevKpi?.reopenedCount ?? null,    true,  "");
 
       prevKpi = { ...d };
 
@@ -989,9 +1067,10 @@
         document.getElementById("actions-placeholder").textContent = noAiMsg;
       }
 
-      runHistory.push({ ts: new Date(), v: d.cycleTimeDays });
+      runHistory.push({ ts: new Date(), v: d.cycleTimeDays, t: d.throughput });
       LS.saveState();
       drawChart();
+      drawThroughputChart();
       flashKpi();
     }
 
@@ -1049,15 +1128,15 @@
     // ── Demo data ─────────────────────────────────────────────
     function loadDemoData() {
       const snapshots = [
-        { predictabilityPercent: 58.3, cycleTimeDays: 6.1, throughput: 14, leadTimeDays: 11.4 },
-        { predictabilityPercent: 61.9, cycleTimeDays: 5.7, throughput: 16, leadTimeDays: 10.8 },
-        { predictabilityPercent: 67.4, cycleTimeDays: 4.9, throughput: 19, leadTimeDays: 9.3  },
-        { predictabilityPercent: 63.2, cycleTimeDays: 5.3, throughput: 17, leadTimeDays: 9.9  },
-        { predictabilityPercent: 72.1, cycleTimeDays: 4.2, throughput: 23, leadTimeDays: 8.7  },
+        { doneRatePercent: 58.3, cycleTimeDays: 6.1, throughput: 14, throughputPeriodLabel: "30d", leadTimeDays: 11.4, reopenedCount: 2 },
+        { doneRatePercent: 61.9, cycleTimeDays: 5.7, throughput: 16, throughputPeriodLabel: "30d", leadTimeDays: 10.8, reopenedCount: 1 },
+        { doneRatePercent: 67.4, cycleTimeDays: 4.9, throughput: 19, throughputPeriodLabel: "30d", leadTimeDays: 9.3,  reopenedCount: 0 },
+        { doneRatePercent: 63.2, cycleTimeDays: 5.3, throughput: 17, throughputPeriodLabel: "30d", leadTimeDays: 9.9,  reopenedCount: 3 },
+        { doneRatePercent: 72.1, cycleTimeDays: 4.2, throughput: 23, throughputPeriodLabel: "30d", leadTimeDays: 8.7,  reopenedCount: 0 },
       ];
 
       const analysis =
-        "Summary: Flow is stabilising but QA remains the primary bottleneck — cycle time improved 31% over 5 syncs yet predictability is still below the 80% threshold.\n" +
+        "Summary: Flow is stabilising but QA remains the primary bottleneck — cycle time improved 31% over 5 syncs yet done rate is still below the 80% threshold.\n" +
         "Risks:\n" +
         "- QA queue depth growing — 6 tickets blocked waiting for review for 3+ days\n" +
         "- Sprint overcommitment: planned velocity 28, actual 23 (-18%)\n" +
@@ -1085,6 +1164,7 @@
     restoreState();
     renderTabs();
     drawChart();
+    drawThroughputChart();
 
     connectButton.addEventListener("click", handleConnect);
     runButton.addEventListener("click", runReport);
