@@ -3,7 +3,7 @@
 
 POST http://localhost:5678/webhook/sync-report
 Body: { baseUrl, email, apiToken, jql }
-Returns: { ok, dashboard: { doneRatePercent, cycleTimeDays, throughput, throughputPeriodLabel, leadTimeDays, reopenedCount, analysis } }
+Returns: { ok, dashboard: { cycleTimeDays, throughput, throughputPeriodLabel, leadTimeDays, reopenedCount, analysis } }
 """
 
 import json
@@ -97,7 +97,6 @@ def calculate_metrics(issues, cutoff=None):
         "cycleTimeDays":  avg_days(completed, "started_at", "resolved_at"),
         "leadTimeDays":   avg_days(completed, "created_at", "resolved_at"),
         "throughput":     len(completed),
-        "doneRatePercent": round(len(completed) / len(mapped) * 100, 1) if mapped else 0,
         "backlogSize":    len(backlog),
         "inProgressCount": len(in_progress),
         "reopenedCount":  sum(1 for i in completed if i["reopened"]),
@@ -181,7 +180,6 @@ def call_openai(metrics, api_key, period_label="all time"):
         f"- Cycle Time: {m['cycleTimeDays']}d\n"
         f"- Lead Time: {m['leadTimeDays']}d\n"
         f"- Throughput: {m['throughput']} issues\n"
-        f"- Done Rate: {m['doneRatePercent']}%\n"
         f"- Backlog: {m['backlogSize']} | In Progress: {m['inProgressCount']} | Reopened: {m['reopenedCount']}\n\n"
         "Identify risks, explain causes, suggest 3 specific actions. No generic advice.\n\n"
         "Return:\nSummary: 1-2 sentences\nRisks:\n- ...\nActions:\n- ..."
@@ -333,7 +331,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 print(f"OpenAI error: {e}")
 
         if tg_token and tg_chat:
-            icon       = "🟢" if metrics["doneRatePercent"] >= 80 else ("🟡" if metrics["doneRatePercent"] >= 60 else "🔴")
+            icon       = "🔴" if metrics["throughput"] == 0 else ("🟡" if metrics["reopenedCount"] > 0 else "🟢")
             date       = datetime.now().strftime("%-d %b %Y")
             title      = project_name if project_name else "Delivery Report"
             period_str = {"7d": "7 дней", "30d": "30 дней", "90d": "90 дней"}.get(period, "всё время")
@@ -344,7 +342,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "━━━ Метрики ━━━",
                 f"✅ Завершено: {metrics['throughput']}   🔄 В работе: {metrics['inProgressCount']}   📋 Бэклог: {metrics['backlogSize']}",
                 f"⚠️ Переоткрыто: {metrics['reopenedCount']}" if metrics["reopenedCount"] else None,
-                f"{icon} Done Rate: {metrics['doneRatePercent']}%",
                 f"⏱ Cycle Time: {metrics['cycleTimeDays']}д   📅 Lead Time: {metrics['leadTimeDays']}д   🚀 Throughput: {metrics['throughput']} за {period_str}",
                 "",
                 "━━━ AI-анализ ━━━",
@@ -356,7 +353,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return {
             "ok": True,
             "dashboard": {
-                "doneRatePercent":      metrics["doneRatePercent"],
                 "cycleTimeDays":        metrics["cycleTimeDays"],
                 "throughput":           metrics["throughput"],
                 "throughputPeriodLabel": throughput_label,
