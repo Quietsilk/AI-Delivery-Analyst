@@ -817,11 +817,15 @@
       const url   = jiraBaseUrlInput.value.trim();
       const email = jiraEmailInput.value.trim();
       const token = jiraTokenInput.value.trim();
-      const jql   = jiraJqlInput.value.trim();
-      if (!url || !email || !token || !jql) return "Fill in all fields.";
+      if (!url || !email || !token)        return "Fill in URL, Email and API Token.";
       if (!/^https:\/\/.+/i.test(url))     return "URL must start with https://";
       if (!/^\S+@\S+\.\S+$/.test(email))   return "Enter a valid email.";
       return "";
+    }
+
+    function validateSync() {
+      const jql = jiraJqlInput.value.trim();
+      return jql ? "" : "JQL is empty — select a project or enter a query.";
     }
 
     function setConnected(ok, msg) {
@@ -974,6 +978,11 @@
           actionsList.classList.remove("hidden");
           actionsPlaceholder.classList.add("hidden");
         }
+      } else if (d.aiError) {
+        const msg = "AI unavailable: " + d.aiError;
+        document.getElementById("ai-analysis-text").textContent  = msg;
+        document.getElementById("risks-placeholder").textContent  = msg;
+        document.getElementById("actions-placeholder").textContent = msg;
       } else if (d.aiEnabled === false) {
         document.getElementById("ai-analysis-text").textContent  = noAiMsg;
         document.getElementById("risks-placeholder").textContent  = noAiMsg;
@@ -988,6 +997,11 @@
 
     async function runReport() {
       if (!jiraConnected) return;
+      const syncErr = validateSync();
+      if (syncErr) {
+        lastRunStatusNode.textContent = syncErr;
+        return;
+      }
       const endpoint = (CONFIG.telegramWebhookUrl || "").trim();
       if (!endpoint) {
         lastRunStatusNode.textContent = "Ошибка: укажите telegramWebhookUrl в CONFIG.";

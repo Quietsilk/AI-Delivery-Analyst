@@ -1,41 +1,48 @@
 # AI Delivery Analyst
 
-Система раннего обнаружения delivery-рисков. Подключается к Jira, считает метрики, анализирует с помощью AI и отправляет отчёт в Telegram — без ручного труда.
+Система раннего обнаружения delivery-рисков. Подключается к Jira, считает метрики из changelog, анализирует через AI и отправляет отчёт в Telegram — без ручного труда.
 
 ---
 
 ## Что делает
 
-1. Получает задачи из Jira по JQL-запросу (с пагинацией)
-2. Вычисляет delivery-метрики из changelog: Cycle Time, Lead Time, Throughput, Predictability
-3. Фильтрует по периоду (7d / 30d / 90d / All)
-4. Анализирует метрики через OpenAI → структурированные риски и действия
-5. Отправляет отчёт в Telegram
-6. Отображает всё в браузерном дашборде
-
----
-
-## Стек
-
-- **Python 3.9+** — сервер на stdlib, без зависимостей
-- **HTML/CSS/JS** — однофайловый дашборд
-- **Jira Cloud REST API** — `/rest/api/3/search/jql` + `/rest/api/3/issue/{key}/changelog`
-- **OpenAI Responses API** — `o4-mini`, опционально
-- **Telegram Bot API** — доставка отчётов, опционально
+1. Получает задачи из Jira по JQL-запросу (cursor-based пагинация)
+2. Параллельно загружает changelog для каждой задачи (до 10 потоков)
+3. Вычисляет delivery-метрики: Cycle Time, Lead Time, Throughput, Predictability
+4. Фильтрует завершённые задачи по периоду (7d / 30d / 90d / All)
+5. Анализирует метрики через OpenAI → Summary, Risks, Actions
+6. Отправляет отчёт в Telegram (умный чанкинг ≤4096 символов)
+7. Отображает всё в браузерном дашборде в реальном времени
 
 ---
 
 ## Быстрый старт
 
 ```bash
-cp .env.example .env
-# Заполни .env (минимум: только OPENAI_API_KEY если нужен AI-анализ)
+# 1. Клонировать
+git clone https://github.com/Quietsilk/AI-Delivery-Analyst
+cd AI-Delivery-Analyst
 
-python3 server.py
+# 2. Настроить окружение (AI и Telegram — опционально)
+cp .env.example .env
+# Отредактировать .env
+
+# 3. Запустить
+./start.sh
 # → http://localhost:5678
 ```
 
-Credentials Jira вводятся прямо в дашборде и сохраняются в localStorage.
+Credentials Jira (URL, email, API token) вводятся прямо в дашборде и сохраняются в localStorage.
+
+---
+
+## Стек
+
+- **Python 3.9+** — сервер на stdlib, без зависимостей (`pip install` не нужен)
+- **HTML/CSS/JS** — однофайловый дашборд, работает в браузере
+- **Jira Cloud REST API** — `/rest/api/3/search/jql` + `/rest/api/3/issue/{key}/changelog`
+- **OpenAI Responses API** — модель `o4-mini`, опционально
+- **Telegram Bot API** — доставка отчётов, опционально
 
 ---
 
@@ -43,17 +50,17 @@ Credentials Jira вводятся прямо в дашборде и сохран
 
 ```
 ai-delivery-analyst/
-├── server.py          # HTTP-сервер: роутинг, Jira, метрики, OpenAI, Telegram
-├── ai-delivery-analyst-dashboard.html  # UI (однофайловый)
-├── start.sh           # Обёртка запуска
+├── server.py                          # HTTP-сервер: роутинг, Jira, метрики, OpenAI, Telegram
+├── ai-delivery-analyst-dashboard.html # UI (однофайловый)
+├── start.sh                           # Обёртка запуска
 ├── tests/
-│   └── test_server.py # 33 regression-теста (stdlib unittest)
+│   └── test_server.py                 # 33 regression-теста (stdlib unittest)
 ├── docs/
 │   ├── architecture.md
 │   ├── backlog.md
 │   └── risks.md
-├── .env               # Локальные секреты (не в git)
-└── .env.example       # Шаблон
+├── .env.example                       # Шаблон переменных окружения
+└── .env                               # Локальные секреты (не в git)
 ```
 
 ---
@@ -63,32 +70,65 @@ ai-delivery-analyst/
 | Переменная | Описание | Обязательна |
 |---|---|---|
 | `OPENAI_API_KEY` | Ключ OpenAI для AI-анализа | Нет |
-| `TELEGRAM_BOT_TOKEN` | Токен бота для отправки отчётов | Нет |
-| `TELEGRAM_CHAT_ID` | ID чата / группы Telegram | Нет |
+| `TELEGRAM_BOT_TOKEN` | Токен Telegram-бота | Нет |
+| `TELEGRAM_CHAT_ID` | ID чата или группы Telegram | Нет |
 
-Jira credentials (URL, email, API token) и JQL вводятся в UI и хранятся в localStorage браузера.
+Jira credentials вводятся в UI и не хранятся на сервере.
 
 ---
 
 ## Метрики
 
-Все метрики считаются из changelog Jira — не из статических полей.
+Все метрики вычисляются из changelog Jira — не из статических полей.
 
 | Метрика | Определение |
 |---|---|
-| **Cycle Time** | Время от первого перехода в "In Progress" до завершения |
-| **Lead Time** | Время от создания задачи до завершения |
-| **Throughput** | Количество завершённых задач за период |
-| **Predictability** | Завершённые за период / все задачи в выборке × 100% |
+| **Cycle Time** | Среднее время от первого перехода в "In Progress" до завершения |
+| **Lead Time** | Среднее время от создания задачи до завершения |
+| **Throughput** | Количество завершённых задач за выбранный период |
+| **Predictability** | Завершённые / все задачи в выборке × 100% |
 
-Статусы "в работе" и "завершено" определяются case-insensitive.
+Определение статусов (case-insensitive):
+
+```python
+STARTED = {"in progress", "selected for development", "в работе", "in development"}
+DONE    = {"done", "closed", "resolved", "выполнено", "complete"}
+```
 
 ---
 
-## Фильтр периода
+## Period-фильтр
 
-Period-фильтр применяется только к завершённым задачам (`resolved_at`).
-In Progress и Backlog всегда показывают актуальное состояние.
+Фильтр применяется **только к завершённым задачам** по дате `resolved_at`.  
+In Progress и Backlog всегда отражают актуальное состояние независимо от периода.
+
+---
+
+## AI-анализ
+
+Если `OPENAI_API_KEY` задан, сервер вызывает `o4-mini` и возвращает:
+
+- **Summary** — 1-2 предложения о состоянии доставки
+- **Risks** — конкретные риски с причинами
+- **Actions** — 3 рекомендованных действия
+
+Состояния AI в дашборде:
+
+| Состояние | Причина | Что показывает UI |
+|---|---|---|
+| Анализ готов | OpenAI ответил | Summary, Risks, Actions |
+| `AI unavailable: ...` | Ошибка API (429, timeout) | Текст ошибки во всех трёх панелях |
+| `AI not configured` | `OPENAI_API_KEY` не задан | Подсказка в панелях |
+
+---
+
+## Jira API
+
+Сервер использует новый `/rest/api/3/search/jql` endpoint (Jira Cloud):
+
+- `fieldsByKeys: true` обязателен для получения `key` и именованных полей
+- Пагинация через `nextPageToken` (cursor-based, не offset)
+- Changelog загружается параллельно (до 10 потоков) для ускорения
 
 ---
 
@@ -98,22 +138,22 @@ In Progress и Backlog всегда показывают актуальное с
 python3 -m unittest tests/test_server.py -v
 ```
 
-33 теста, без внешних зависимостей. Покрытие: метрики, пагинация, Telegram-чанкинг, HTTP-интеграция, period-фильтр.
+33 теста без внешних зависимостей. Покрытие:
+
+| Группа | Тестов |
+|---|---|
+| `calculate_metrics` — пустой список, completed, WIP, backlog, cutoff, reopened, cycle/lead time | 11 |
+| `_split_telegram` — короткий текст, split по newline/space, hard cut, пустые чанки | 7 |
+| `fetch_jira` — одна страница, cursor pagination, остановка по размеру страницы | 3 |
+| HTTP-интеграция — GET, 404, CORS, POST pipeline, 500 на ошибке Jira, period=7d | 7 |
+| `_parse_dt` — форматы Z, +00:00, +HH:MM | 3 |
+| `load_env` — загрузка файла, отсутствующий файл | 2 |
 
 ---
 
-## AI-анализ
+## Известные ограничения
 
-Если `OPENAI_API_KEY` задан — сервер вызывает `o4-mini` и возвращает:
-- **Summary** — 1-2 предложения о состоянии доставки
-- **Risks** — конкретные риски с причинами
-- **Actions** — 3 действия
-
-Если ключ не задан — метрики работают в полном объёме, AI-панели показывают подсказку.
-
----
-
-## Telegram
-
-Отчёт отправляется автоматически после каждого синка (если настроен бот).
-Длинные отчёты разбиваются на чанки по границам строк — без обрыва слов.
+- Статусы STARTED/DONE задаются в коде `server.py` (не конфигурируются через UI)
+- История синков хранится только в localStorage браузера (до 30 записей)
+- Один JQL-запрос на синк (multi-source не реализован)
+- Нет scheduled/cron запуска — только ручной синк через UI

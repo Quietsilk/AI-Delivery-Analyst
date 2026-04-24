@@ -280,44 +280,42 @@ class TestSplitTelegram(unittest.TestCase):
 # ── fetch_jira pagination ──────────────────────────────────────────────────────
 
 class TestFetchJiraPagination(unittest.TestCase):
-    def _make_page(self, keys, is_last):
-        return {
+    def _make_page(self, keys, is_last, next_page_token=None):
+        page = {
             "issues": [
-                {"key": k, "fields": {"status": {"name": "To Do"}, "created": "2024-01-01T00:00:00Z", "resolutiondate": None}}
+                {"key": k, "fields": {"status": {"name": "To Do"}, "created": "2024-01-01T00:00:00+00:00", "resolutiondate": None}}
                 for k in keys
             ],
             "isLast": is_last,
         }
+        if next_page_token:
+            page["nextPageToken"] = next_page_token
+        return page
 
     def test_single_page(self):
         page = self._make_page(["T-1", "T-2"], is_last=True)
-        with patch("server.jira_request", side_effect=[page, *[{"values": []} for _ in range(10)]]):
+        with patch("server.jira_request", return_value=page):
             result = server.fetch_jira("https://jira.test", "user@test.com", "token", "project = TEST")
         self.assertEqual(len(result["issues"]), 2)
 
     def test_two_pages(self):
-        page1 = self._make_page([f"T-{i}" for i in range(50)], is_last=False)
+        # cursor-based pagination: page1 returns nextPageToken, page2 is last
+        page1 = self._make_page([f"T-{i}" for i in range(50)], is_last=False, next_page_token="cursor-abc")
         page2 = self._make_page([f"T-{i}" for i in range(50, 60)], is_last=True)
-        changelog_mock = {"values": []}
 
-        call_count = 0
         def side_effect(url, auth, body=None):
-            nonlocal call_count
-            call_count += 1
-            if body is not None:
-                if call_count == 1:
-                    return page1
-                if call_count == 2:
-                    return page2
-            return changelog_mock
+            if body and body.get("nextPageToken"):
+                return page2
+            return page1
 
         with patch("server.jira_request", side_effect=side_effect):
             result = server.fetch_jira("https://jira.test", "user@test.com", "token", "project = TEST")
         self.assertEqual(len(result["issues"]), 60)
 
     def test_stops_when_page_smaller_than_page_size(self):
-        page = self._make_page(["T-1", "T-2"], is_last=False)  # isLast=False but < PAGE_SIZE
-        with patch("server.jira_request", side_effect=[page, *[{"values": []} for _ in range(10)]]):
+        # isLast=False but len(page) < PAGE_SIZE → stop without nextPageToken
+        page = self._make_page(["T-1", "T-2"], is_last=False)
+        with patch("server.jira_request", return_value=page):
             result = server.fetch_jira("https://jira.test", "user@test.com", "token", "project = TEST")
         self.assertEqual(len(result["issues"]), 2)
 

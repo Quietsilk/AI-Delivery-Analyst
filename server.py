@@ -12,6 +12,7 @@ import os
 import urllib.request
 import urllib.parse
 import http.server
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 
 PORT = 5678
@@ -24,7 +25,11 @@ DONE    = {"done", "closed", "resolved", "выполнено", "complete"}
 # ── Metrics ────────────────────────────────────────────────────────────────────
 
 def _parse_dt(s):
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    s = s.replace("Z", "+00:00")
+    # Python 3.9 fromisoformat requires +HH:MM, not +HHMM
+    if len(s) > 5 and s[-5] in ("+", "-") and ":" not in s[-5:]:
+        s = s[:-2] + ":" + s[-2:]
+    return datetime.fromisoformat(s)
 
 
 def calculate_metrics(issues, cutoff=None):
@@ -119,21 +124,25 @@ def fetch_jira(base_url, email, api_token, jql):
     auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
 
     # ── Paginate through all issues ───────────────────────────────
-    all_issues = []
-    start_at   = 0
+    # /search/jql uses cursor pagination (nextPageToken), not offset (startAt)
+    # fieldsByKeys:true required to get key + named fields in response
+    all_issues     = []
+    next_page_token = None
     while True:
-        data   = jira_request(
-            f"{base_url}/rest/api/3/search/jql",
-            auth,
-            {"jql": jql, "startAt": start_at, "maxResults": PAGE_SIZE,
-             "fields": ["summary", "status", "created", "resolutiondate"]},
-        )
+        body = {
+            "jql": jql, "maxResults": PAGE_SIZE,
+            "fieldsByKeys": True,
+            "fields": ["summary", "status", "created", "resolutiondate"],
+        }
+        if next_page_token:
+            body["nextPageToken"] = next_page_token
+        data = jira_request(f"{base_url}/rest/api/3/search/jql", auth, body)
         page = data.get("issues", [])
         all_issues.extend(page)
-        print(f"  Fetched {len(all_issues)} issues so far (page startAt={start_at})")
-        if data.get("isLast", True) or len(page) < PAGE_SIZE:
+        print(f"  Fetched {len(all_issues)} issues so far")
+        next_page_token = data.get("nextPageToken")
+        if data.get("isLast", True) or not next_page_token or len(page) < PAGE_SIZE:
             break
-        start_at += len(page)
 
     # ── Fetch changelog for resolved + actively in-progress issues ─
     # Backlog items (never started) don't need changelog.
@@ -142,16 +151,22 @@ def fetch_jira(base_url, email, api_token, jql):
         if i.get("fields", {}).get("resolutiondate")
         or i.get("fields", {}).get("status", {}).get("name", "").lower() in STARTED
     ]
-    changelogs = {}
-    for key in needs_changelog:
+    print(f"  Fetching changelogs for {len(needs_changelog)} issues (parallel)…")
+
+    def fetch_changelog(key):
         try:
             cl = jira_request(
                 f"{base_url}/rest/api/3/issue/{key}/changelog?maxResults=100",
                 auth,
             )
-            changelogs[key] = cl.get("values", [])
+            return key, cl.get("values", [])
         except Exception:
-            changelogs[key] = []
+            return key, []
+
+    changelogs = {}
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for key, values in pool.map(fetch_changelog, needs_changelog):
+            changelogs[key] = values
 
     for issue in all_issues:
         issue["changelog"] = {"histories": changelogs.get(issue["key"], [])}
@@ -287,13 +302,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         metrics = calculate_metrics(data.get("issues", []), cutoff)
         print(f"Metrics: {metrics}")
 
-        analysis = ""
+        analysis  = ""
+        ai_error  = ""
         if openai_key:
             print("Calling OpenAI…")
             try:
                 analysis = call_openai(metrics, api_key=openai_key, period_label=period_label)
             except Exception as e:
-                analysis = f"AI analysis unavailable: {e}"
+                ai_error = str(e)
                 print(f"OpenAI error: {e}")
 
         if tg_token and tg_chat:
@@ -326,6 +342,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "leadTimeDays":          metrics["leadTimeDays"],
                 "analysis":              analysis,
                 "aiEnabled":             bool(openai_key),
+                "aiError":               ai_error,
             },
         }
 
