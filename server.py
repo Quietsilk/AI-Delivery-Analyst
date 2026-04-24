@@ -191,17 +191,40 @@ def call_openai(metrics, api_key, period_label="all time"):
     )
 
 
+def _split_telegram(text, max_len=4096):
+    if len(text) <= max_len:
+        return [text]
+    chunks, remaining = [], text
+    while remaining:
+        if len(remaining) <= max_len:
+            chunks.append(remaining)
+            break
+        slice_ = remaining[:max_len]
+        cut = slice_.rfind("\n")
+        if cut <= 0:
+            cut = slice_.rfind(" ")
+        if cut <= 0:
+            cut = max_len
+        chunk = remaining[:cut].rstrip()
+        if chunk:
+            chunks.append(chunk)
+        remaining = remaining[cut:].lstrip()
+    return chunks
+
+
 def send_telegram(text, token, chat_id):
-    body = json.dumps({"chat_id": chat_id, "text": text[:4096]}).encode()
-    req  = urllib.request.Request(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data=body,
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        urllib.request.urlopen(req, timeout=15)
-    except Exception as e:
-        print(f"Telegram error: {e}")
+    for chunk in _split_telegram(text):
+        body = json.dumps({"chat_id": chat_id, "text": chunk}).encode()
+        req  = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=15)
+        except Exception as e:
+            print(f"Telegram error: {e}")
+            break
 
 
 # ── HTTP handler ───────────────────────────────────────────────────────────────
