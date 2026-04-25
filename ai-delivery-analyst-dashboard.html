@@ -1280,11 +1280,13 @@
 
     document.querySelectorAll("#period-picker .period-btn").forEach(btn => {
       btn.addEventListener("click", () => {
+        if (btn.dataset.period === activePeriod) return;
         activePeriod = btn.dataset.period;
         document.querySelectorAll("#period-picker .period-btn").forEach(b =>
           b.classList.toggle("active", b === btn)
         );
         LS.saveState();
+        if (jiraConnected) runReport();
       });
     });
   </script>
