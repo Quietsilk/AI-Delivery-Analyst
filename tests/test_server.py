@@ -69,7 +69,7 @@ class TestCalculateMetrics(unittest.TestCase):
         m = server.calculate_metrics([])
         self.assertEqual(m["throughput"], 0)
         self.assertEqual(m["cycleTimeDays"], 0)
-        self.assertEqual(m["leadTimeDays"], 0)
+        self.assertEqual(m["timeToMarketDays"], 0)
         self.assertEqual(m["backlogSize"], 0)
         self.assertEqual(m["inProgressCount"], 0)
         self.assertEqual(m["reopenedCount"], 0)
@@ -87,7 +87,7 @@ class TestCalculateMetrics(unittest.TestCase):
         m = server.calculate_metrics([issue])
         self.assertEqual(m["throughput"], 1)
         self.assertEqual(m["cycleTimeDays"], 3.0)   # Jan 2 → Jan 5
-        self.assertEqual(m["leadTimeDays"], 4.0)    # Jan 1 → Jan 5
+        self.assertEqual(m["timeToMarketDays"], 4.0)    # Jan 1 → Jan 5
         self.assertEqual(m["reopenedCount"], 0)
 
     def test_in_progress_issue(self):
@@ -219,7 +219,7 @@ class TestCalculateMetrics(unittest.TestCase):
         )
         m = server.calculate_metrics([issue])
         self.assertEqual(m["cycleTimeDays"], 0)   # no started_at → excluded from avg
-        self.assertEqual(m["leadTimeDays"], 4.0)
+        self.assertEqual(m["timeToMarketDays"], 4.0)
 
     def test_resolved_statuses_are_done_like(self):
         for status in ("Closed", "Resolved"):
@@ -542,8 +542,8 @@ class TestHttpIntegration(unittest.TestCase):
 
 class TestCallOpenai(unittest.TestCase):
     METRICS = {
-        "cycleTimeDays": 3.0, "leadTimeDays": 4.0, "throughput": 5,
-        "backlogSize": 2, "inProgressCount": 1, "reopenedCount": 0,
+        "cycleTimeDays": 3.0, "timeToMarketDays": 4.0, "throughput": 5,
+        "flowEfficiencyPercent": 75.0, "backlogSize": 2, "inProgressCount": 1, "reopenedCount": 0,
     }
 
     def _mock_response(self, payload, status=200):
@@ -871,10 +871,47 @@ class TestHandleTelegramAndAI(unittest.TestCase):
     def test_dashboard_response_shape(self):
         body = self._post([])
         expected_keys = {"cycleTimeDays", "throughput", "throughputPeriodLabel",
-                         "leadTimeDays", "reopenedCount", "analysis", "aiEnabled", "aiError"}
+                         "timeToMarketDays", "reopenedCount", "flowEfficiencyPercent",
+                         "analysis", "aiEnabled", "aiError"}
         self.assertEqual(set(body["dashboard"].keys()), expected_keys)
         self.assertNotIn("doneRatePercent", body["dashboard"])
         self.assertNotIn("completedCount", body["dashboard"])
+
+
+# ── Flow Efficiency ────────────────────────────────────────────────────────────
+
+class TestFlowEfficiency(unittest.TestCase):
+    def test_flow_efficiency_basic(self):
+        # Cycle Time = 3d (Jan 4→Jan 7), Lead Time = 6d (Jan 1→Jan 7) → 50%
+        issue = make_issue(
+            status="Done",
+            created="2024-01-01T00:00:00Z",
+            resolutiondate="2024-01-07T00:00:00Z",
+            transitions=[
+                {"date": "2024-01-04T00:00:00Z", "from": "To Do",       "to": "In Progress"},
+                {"date": "2024-01-07T00:00:00Z", "from": "In Progress", "to": "Done"},
+            ],
+        )
+        m = server.calculate_metrics([issue])
+        self.assertEqual(m["flowEfficiencyPercent"], 50.0)
+
+    def test_flow_efficiency_zero_lead_time(self):
+        m = server.calculate_metrics([])
+        self.assertEqual(m["flowEfficiencyPercent"], 0)
+
+    def test_flow_efficiency_capped_at_100(self):
+        # created after started (anomalous data) — lead < cycle, cap must protect
+        issue = make_issue(
+            status="Done",
+            created="2024-01-05T00:00:00Z",
+            resolutiondate="2024-01-07T00:00:00Z",
+            transitions=[
+                {"date": "2024-01-03T00:00:00Z", "from": "To Do",       "to": "In Progress"},
+                {"date": "2024-01-07T00:00:00Z", "from": "In Progress", "to": "Done"},
+            ],
+        )
+        m = server.calculate_metrics([issue])
+        self.assertLessEqual(m["flowEfficiencyPercent"], 100.0)
 
 
 # ── load_env ───────────────────────────────────────────────────────────────────

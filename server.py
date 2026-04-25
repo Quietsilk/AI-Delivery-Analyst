@@ -3,7 +3,7 @@
 
 POST http://localhost:5678/webhook/sync-report
 Body: { baseUrl, email, apiToken, jql }
-Returns: { ok, dashboard: { cycleTimeDays, throughput, throughputPeriodLabel, leadTimeDays, reopenedCount, analysis } }
+Returns: { ok, dashboard: { cycleTimeDays, throughput, throughputPeriodLabel, timeToMarketDays, reopenedCount, flowEfficiencyPercent, analysis } }
 """
 
 import json
@@ -93,13 +93,18 @@ def calculate_metrics(issues, cutoff=None):
                     print(f"  [warn] avg_days: cannot parse {item.get(a)!r} / {item.get(b)!r} → {e}")
         return round(sum(ds) / len(ds), 1) if ds else 0
 
+    cycle = avg_days(completed, "started_at", "resolved_at")
+    lead  = avg_days(completed, "created_at", "resolved_at")
+    flow_efficiency = round(min(cycle / lead * 100, 100.0), 1) if lead > 0 else 0
+
     return {
-        "cycleTimeDays":  avg_days(completed, "started_at", "resolved_at"),
-        "leadTimeDays":   avg_days(completed, "created_at", "resolved_at"),
-        "throughput":     len(completed),
-        "backlogSize":    len(backlog),
-        "inProgressCount": len(in_progress),
-        "reopenedCount":  sum(1 for i in completed if i["reopened"]),
+        "cycleTimeDays":         cycle,
+        "timeToMarketDays":      lead,
+        "throughput":            len(completed),
+        "flowEfficiencyPercent": flow_efficiency,
+        "backlogSize":           len(backlog),
+        "inProgressCount":       len(in_progress),
+        "reopenedCount":         sum(1 for i in completed if i["reopened"]),
     }
 
 
@@ -178,8 +183,9 @@ def call_openai(metrics, api_key, period_label="all time"):
     prompt = (
         f"Delivery metrics ({period_label}):\n"
         f"- Cycle Time: {m['cycleTimeDays']}d\n"
-        f"- Lead Time: {m['leadTimeDays']}d\n"
+        f"- Time to Market: {m['timeToMarketDays']}d\n"
         f"- Throughput: {m['throughput']} issues\n"
+        f"- Flow Efficiency: {m['flowEfficiencyPercent']}% (cycle/lead time ratio — higher is better)\n"
         f"- Backlog: {m['backlogSize']} | In Progress: {m['inProgressCount']} | Reopened: {m['reopenedCount']}\n\n"
         "Identify risks, explain causes, suggest 3 specific actions. No generic advice.\n\n"
         "Return:\nSummary: 1-2 sentences\nRisks:\n- ...\nActions:\n- ..."
@@ -342,7 +348,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "━━━ Метрики ━━━",
                 f"✅ Завершено: {metrics['throughput']}   🔄 В работе: {metrics['inProgressCount']}   📋 Бэклог: {metrics['backlogSize']}",
                 f"⚠️ Переоткрыто: {metrics['reopenedCount']}" if metrics["reopenedCount"] else None,
-                f"⏱ Cycle Time: {metrics['cycleTimeDays']}д   📅 Lead Time: {metrics['leadTimeDays']}д   🚀 Throughput: {metrics['throughput']} за {period_str}",
+                f"⚡ Flow Efficiency: {metrics['flowEfficiencyPercent']}%",
+                f"⏱ Cycle Time: {metrics['cycleTimeDays']}д   📅 Time to Market: {metrics['timeToMarketDays']}д   🚀 Throughput: {metrics['throughput']} за {period_str}",
                 "",
                 "━━━ AI-анализ ━━━",
                 analysis or "—",
@@ -353,14 +360,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return {
             "ok": True,
             "dashboard": {
-                "cycleTimeDays":        metrics["cycleTimeDays"],
-                "throughput":           metrics["throughput"],
+                "cycleTimeDays":         metrics["cycleTimeDays"],
+                "throughput":            metrics["throughput"],
                 "throughputPeriodLabel": throughput_label,
-                "leadTimeDays":         metrics["leadTimeDays"],
-                "reopenedCount":        metrics["reopenedCount"],
-                "analysis":             analysis,
-                "aiEnabled":            bool(openai_key),
-                "aiError":              ai_error,
+                "timeToMarketDays":      metrics["timeToMarketDays"],
+                "reopenedCount":         metrics["reopenedCount"],
+                "flowEfficiencyPercent": metrics["flowEfficiencyPercent"],
+                "analysis":              analysis,
+                "aiEnabled":             bool(openai_key),
+                "aiError":               ai_error,
             },
         }
 

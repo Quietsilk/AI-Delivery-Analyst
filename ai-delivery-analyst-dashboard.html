@@ -363,7 +363,7 @@
     }
 
     /* KPI row */
-    .kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+    .kpi-row { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
 
     .kpi-card {
       background: var(--card);
@@ -381,6 +381,7 @@
     .kpi-card.kpi-accent-green  { border-top: 3px solid var(--green); }
     .kpi-card.kpi-accent-purple { border-top: 3px solid #a78bfa; }
     .kpi-card.kpi-accent-red    { border-top: 3px solid var(--red); }
+    .kpi-card.kpi-accent-amber  { border-top: 3px solid #f59e0b; }
 
     .kpi-card.kpi-status-good { background: rgba(62,207,142,0.05); }
     .kpi-card.kpi-status-bad  { background: rgba(255,107,107,0.06); }
@@ -599,12 +600,12 @@
               <span class="kpi-delta" id="kpi-throughput-delta"></span>
             </div>
           </div>
-          <div class="kpi-card kpi-accent-purple" id="kpi-lead-time-card">
-            <div class="kpi-label">Lead Time</div>
+          <div class="kpi-card kpi-accent-purple" id="kpi-ttm-card">
+            <div class="kpi-label">Time to Market</div>
             <div class="kpi-sublabel">avg. time created → Done</div>
             <div class="kpi-bottom">
-              <span class="kpi-value" id="kpi-lead-time-value">—</span>
-              <span class="kpi-delta" id="kpi-lead-time-delta"></span>
+              <span class="kpi-value" id="kpi-ttm-value">—</span>
+              <span class="kpi-delta" id="kpi-ttm-delta"></span>
             </div>
           </div>
           <div class="kpi-card kpi-accent-red" id="kpi-reopened-card">
@@ -613,6 +614,14 @@
             <div class="kpi-bottom">
               <span class="kpi-value" id="kpi-reopened-value">—</span>
               <span class="kpi-delta" id="kpi-reopened-delta"></span>
+            </div>
+          </div>
+          <div class="kpi-card kpi-accent-amber" id="kpi-flow-eff-card">
+            <div class="kpi-label">Flow Efficiency</div>
+            <div class="kpi-sublabel">active work / total lead time</div>
+            <div class="kpi-bottom">
+              <span class="kpi-value" id="kpi-flow-eff-value">—</span>
+              <span class="kpi-delta" id="kpi-flow-eff-delta"></span>
             </div>
           </div>
         </div>
@@ -1048,11 +1057,16 @@
       el.className = "kpi-delta " + (good ? "delta-good" : "delta-bad");
     }
 
-    function setKpiStatus(cardId, value, goodThreshold, badThreshold) {
+    function setKpiStatus(cardId, value, goodThreshold, badThreshold, higherIsBetter = false) {
       const el = document.getElementById(cardId);
       el.classList.remove("kpi-status-good", "kpi-status-bad");
-      if (value <= goodThreshold) el.classList.add("kpi-status-good");
-      else if (value >= badThreshold) el.classList.add("kpi-status-bad");
+      if (higherIsBetter) {
+        if (value >= goodThreshold) el.classList.add("kpi-status-good");
+        else if (value <= badThreshold) el.classList.add("kpi-status-bad");
+      } else {
+        if (value <= goodThreshold) el.classList.add("kpi-status-good");
+        else if (value >= badThreshold) el.classList.add("kpi-status-bad");
+      }
     }
 
     // ── Run ───────────────────────────────────────────────────
@@ -1063,7 +1077,7 @@
     }
 
     function flashKpi() {
-      ["kpi-cycle-time-card","kpi-throughput-card","kpi-lead-time-card","kpi-reopened-card"]
+      ["kpi-cycle-time-card","kpi-throughput-card","kpi-ttm-card","kpi-reopened-card","kpi-flow-eff-card"]
         .forEach((id, i) => setTimeout(() => {
           const el = document.getElementById(id);
           el.classList.remove("flashing");
@@ -1097,21 +1111,26 @@
       revealContent();
 
       document.getElementById("kpi-cycle-time-value").textContent = d.cycleTimeDays.toFixed(1) + "d";
-      document.getElementById("kpi-throughput-value").textContent = d.throughput + (d.throughputPeriodLabel ? " / " + d.throughputPeriodLabel : "");
-      document.getElementById("kpi-lead-time-value").textContent  = d.leadTimeDays.toFixed(1) + "d";
+      document.getElementById("kpi-throughput-value").textContent = d.throughput;
+      document.getElementById("kpi-ttm-value").textContent        = (d.timeToMarketDays ?? 0).toFixed(1) + "d";
 
       const reopened = d.reopenedCount ?? 0;
       document.getElementById("kpi-reopened-value").textContent = reopened;
       const reopenedCard = document.getElementById("kpi-reopened-card");
       reopenedCard.classList.toggle("kpi-warn", reopened > 0);
 
-      setDelta("kpi-cycle-time-delta", d.cycleTimeDays,  prevKpi?.cycleTimeDays ?? null,  true,  "d");
-      setDelta("kpi-throughput-delta", d.throughput,     prevKpi?.throughput ?? null,      false, "");
-      setDelta("kpi-lead-time-delta",  d.leadTimeDays,   prevKpi?.leadTimeDays ?? null,    true,  "d");
-      setDelta("kpi-reopened-delta",   reopened,         prevKpi?.reopenedCount ?? null,   true,  "");
+      const flowEff = d.flowEfficiencyPercent ?? 0;
+      document.getElementById("kpi-flow-eff-value").textContent = flowEff.toFixed(1) + "%";
 
-      setKpiStatus("kpi-cycle-time-card", d.cycleTimeDays, 5, 10);
-      setKpiStatus("kpi-lead-time-card",  d.leadTimeDays,  10, 20);
+      setDelta("kpi-cycle-time-delta", d.cycleTimeDays,       prevKpi?.cycleTimeDays ?? null,        true,  "d");
+      setDelta("kpi-throughput-delta", d.throughput,          prevKpi?.throughput ?? null,           false, "");
+      setDelta("kpi-ttm-delta",        d.timeToMarketDays,    prevKpi?.timeToMarketDays ?? null,     true,  "d");
+      setDelta("kpi-reopened-delta",   reopened,              prevKpi?.reopenedCount ?? null,        true,  "");
+      setDelta("kpi-flow-eff-delta",   flowEff,               prevKpi?.flowEfficiencyPercent ?? null, false, "%");
+
+      setKpiStatus("kpi-cycle-time-card", d.cycleTimeDays,    5,  10);
+      setKpiStatus("kpi-ttm-card",        d.timeToMarketDays, 10, 20);
+      setKpiStatus("kpi-flow-eff-card",   flowEff,            40, 15,  true);
       document.getElementById("kpi-throughput-card")
         .classList.toggle("kpi-status-bad", d.throughput === 0);
 
@@ -1214,11 +1233,11 @@
     // ── Demo data ─────────────────────────────────────────────
     function loadDemoData() {
       const snapshots = [
-        { cycleTimeDays: 6.1, throughput: 14, throughputPeriodLabel: "30d", leadTimeDays: 11.4, reopenedCount: 2 },
-        { cycleTimeDays: 5.7, throughput: 16, throughputPeriodLabel: "30d", leadTimeDays: 10.8, reopenedCount: 1 },
-        { cycleTimeDays: 4.9, throughput: 19, throughputPeriodLabel: "30d", leadTimeDays: 9.3,  reopenedCount: 0 },
-        { cycleTimeDays: 5.3, throughput: 17, throughputPeriodLabel: "30d", leadTimeDays: 9.9,  reopenedCount: 3 },
-        { cycleTimeDays: 4.2, throughput: 23, throughputPeriodLabel: "30d", leadTimeDays: 8.7,  reopenedCount: 0 },
+        { cycleTimeDays: 6.1, throughput: 14, throughputPeriodLabel: "30d", timeToMarketDays: 11.4, reopenedCount: 2, flowEfficiencyPercent: 53.5 },
+        { cycleTimeDays: 5.7, throughput: 16, throughputPeriodLabel: "30d", timeToMarketDays: 10.8, reopenedCount: 1, flowEfficiencyPercent: 52.8 },
+        { cycleTimeDays: 4.9, throughput: 19, throughputPeriodLabel: "30d", timeToMarketDays: 9.3,  reopenedCount: 0, flowEfficiencyPercent: 52.7 },
+        { cycleTimeDays: 5.3, throughput: 17, throughputPeriodLabel: "30d", timeToMarketDays: 9.9,  reopenedCount: 3, flowEfficiencyPercent: 53.5 },
+        { cycleTimeDays: 4.2, throughput: 23, throughputPeriodLabel: "30d", timeToMarketDays: 8.7,  reopenedCount: 0, flowEfficiencyPercent: 48.3 },
       ];
 
       const analysis =
