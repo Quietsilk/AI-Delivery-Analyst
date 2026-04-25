@@ -886,6 +886,8 @@
 
       sidebarCollapsed = LS.load("ada:sidebarCollapsed", false);
       applySidebarState(false);
+
+      if (!validate()) setConnected(true, "Connected");
     }
 
     // ── Chip helpers ──────────────────────────────────────────
