@@ -8,9 +8,9 @@ import base64
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
-from server.metrics import calculate_metrics, _parse_dt, DONE
+from server.metrics import calculate_metrics, _map_issue, _parse_dt, DONE
 from server.storage import save_snapshot, get_latest
 
 
@@ -103,6 +103,49 @@ def _count_resolved_since(issues, since_ts):
     return count
 
 
+def _calc_predictability(issues):
+    """Predictability % over a rolling 30-day window.
+
+    committed = started before period_end AND not finished before period_start
+    completed = resolved inside the 30-day window
+    predictability = completed / committed * 100
+    """
+    period_end   = datetime.now(timezone.utc)
+    period_start = period_end - timedelta(days=30)
+
+    committed = []
+    completed_in_period = []
+    for issue in issues:
+        m = _map_issue(issue)
+        if not m["started_at"]:
+            continue
+        try:
+            started_dt = _parse_dt(m["started_at"])
+        except Exception:
+            continue
+        # Committed: started before period ends AND not resolved before period starts
+        resolved_before_period = False
+        if m["resolved_at"]:
+            try:
+                resolved_before_period = _parse_dt(m["resolved_at"]) < period_start
+            except Exception:
+                pass
+        if started_dt < period_end and not resolved_before_period:
+            committed.append(m)
+        # Completed in period: resolved within window
+        if m["resolved_at"]:
+            try:
+                resolved_dt = _parse_dt(m["resolved_at"])
+                if period_start <= resolved_dt <= period_end:
+                    completed_in_period.append(m)
+            except Exception:
+                pass
+
+    if not committed:
+        return 0
+    return round(len(completed_in_period) / len(committed) * 100, 1)
+
+
 def run_ingestion(project_key, base_url, email, api_token, jql, db_path="snapshots.db"):
     """Full ingestion pipeline for one project.
 
@@ -120,6 +163,13 @@ def run_ingestion(project_key, base_url, email, api_token, jql, db_path="snapsho
     prev = get_latest(project_key, db_path)
     since_ts = prev["timestamp"] if prev else None
     metrics["throughput"] = _count_resolved_since(issues, since_ts)
+
+    # WIP Ratio = inProgressCount / throughput (0 if throughput == 0)
+    tp = metrics["throughput"]
+    metrics["wipRatio"] = round(metrics["inProgressCount"] / tp, 2) if tp > 0 else 0
+
+    # Predictability = completed-in-30d / committed-in-30d (%)
+    metrics["predictabilityPercent"] = _calc_predictability(issues)
 
     ts = save_snapshot(project_key, metrics, db_path)
     print(f"[ingestion] {project_key}: snapshot saved at {ts} — {metrics}")

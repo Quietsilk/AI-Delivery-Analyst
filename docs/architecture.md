@@ -3,47 +3,82 @@
 ## Обзор
 
 ```
-Browser (dashboard.html)
+Browser (dashboard.html — read-only UI)
     │
-    │  POST /webhook/sync-report
-    │  { baseUrl, email, apiToken, jql, period }
-    ▼
-server.py (Python stdlib HTTP)
-    │
-    ├── fetch_jira()
-    │       │
-    │       ├── POST /rest/api/3/search/jql   (пагинация, PAGE_SIZE=50)
-    │       └── GET  /rest/api/3/issue/{key}/changelog
-    │               (для всех задач)
-    │
-    ├── calculate_metrics(issues, cutoff)
-    │       ├── Cycle Time        (последний started_at → resolved_at)
-    │       ├── Time to Market    (created_at → resolved_at)
-    │       ├── Flow Efficiency   (cycleTime / timeToMarket × 100, cap 100%)
-    │       ├── Throughput        (кол-во resolved за период)
-    │       └── Backlog / WIP / Reopened counts (Reopened — только среди completed)
-    │
-    ├── call_openai()          [опционально]
-    │       └── POST /v1/responses (o4-mini, reasoning medium)
-    │
-    ├── send_telegram()        [опционально]
-    │       └── POST /bot{token}/sendMessage (с чанкингом ≤4096)
-    │
-    └── JSON response → Browser
-            { ok, dashboard: { metrics..., analysis, aiEnabled } }
+    ├── GET  /latest?project=KEY       ← читает последний снапшот
+    ├── GET  /history?project=KEY&period=30d  ← читает историю
+    └── POST /sync  { project, creds, jql }  ← запускает ингест в фоне
+            │
+            ▼
+server.py  (тонкий HTTP-роутер)
+            │
+            ├── server/api.py          ← handle_get_latest, handle_get_history, handle_post_sync
+            │
+            ├── server/ingestion.py    ← fetch_jira → calculate_metrics → save_snapshot
+            │       │
+            │       ├── server_app.fetch_jira()
+            │       │       ├── POST /rest/api/3/search/jql  (пагинация, PAGE_SIZE=50)
+            │       │       └── GET  /rest/api/3/issue/{key}/changelog  (параллельно, 10 потоков)
+            │       │
+            │       └── server/metrics.py → calculate_metrics(issues)
+            │               ├── Cycle Time        (последний started_at → resolved_at)
+            │               ├── Time to Market    (created_at → resolved_at)
+            │               ├── Flow Efficiency   (cycleTime / timeToMarket × 100, cap 100%)
+            │               ├── Throughput        (выставляется в ingestion, не в metrics)
+            │               └── Backlog / WIP / Reopened
+            │
+            ├── server/storage.py      ← SQLite CRUD
+            │       └── snapshots(id, project_key, timestamp, metrics_json)
+            │
+            └── server/scheduler.py   ← daemon-поток, запускает ingestion по расписанию
+                    └── SYNC_INTERVAL_SECONDS (default 3600)
 ```
 
 ---
 
-## Принципы
+## Архитектурные инварианты
 
-**Метрики детерминированы.** Всё считается из changelog Jira по явным правилам. AI не участвует в расчётах.
+**Инвариант 1 — UI read-only.**
+Браузер никогда не инициирует расчёт метрик. Он только читает сохранённые снапшоты. Метрики считаются один раз при ingestion и сохраняются.
 
-**AI — интерпретатор, не калькулятор.** Если ключ не задан — метрики работают полностью, AI-панели показывают подсказку.
+**Инвариант 2 — Иммутабельные снапшоты.**
+Каждый запуск ingestion создаёт новую строку в SQLite. Никаких UPDATE/DELETE.
 
-**Period-фильтр server-side.** Cutoff применяется к `resolved_at` завершённых задач. In Progress и Backlog всегда актуальные (без фильтра).
+**Инвариант 3 — Throughput = дельта снапшотов.**
+`throughput` = количество задач, resolved с момента предыдущего снапшота. Вычисляется в `ingestion.py`, не в `metrics.py`.
 
-**Zero-dependency backend.** server.py использует только stdlib Python 3.9+. Установка не нужна.
+**Инвариант 4 — Period без пересчёта.**
+`GET /history?period=30d` фильтрует строки SQLite по полю `timestamp`. Метрики не пересчитываются.
+
+**Инвариант 5 — `calculate_metrics` без `period`.**
+Функция `calculate_metrics(issues)` не принимает `cutoff`/`period` в сигнатуре.
+
+---
+
+## SQLite-схема
+
+```sql
+CREATE TABLE snapshots (
+    id           INTEGER PRIMARY KEY,
+    project_key  TEXT NOT NULL,
+    timestamp    TEXT NOT NULL,   -- ISO 8601
+    metrics_json TEXT NOT NULL    -- JSON: cycleTimeDays, throughput, …
+);
+```
+
+Данные только добавляются (INSERT). История хранится бессрочно.
+
+---
+
+## Пакет server/
+
+| Модуль | Экспортирует | Назначение |
+|---|---|---|
+| `metrics.py` | `calculate_metrics(issues)` | Чистая функция, нет side-эффектов |
+| `storage.py` | `init_db`, `save_snapshot`, `get_latest`, `get_history`, `get_previous_snapshot` | SQLite CRUD |
+| `ingestion.py` | `run_ingestion(project_key, base_url, email, api_token, jql, db_path)` | Полный pipeline: fetch → metrics → throughput delta → save |
+| `api.py` | `handle_get_latest`, `handle_get_history`, `handle_post_sync` | HTTP handlers |
+| `scheduler.py` | `start_scheduler(projects, db_path, interval)` | Daemon-поток |
 
 ---
 
@@ -61,31 +96,39 @@ Jira Raw Issue
             created_at   ← fields.created
             reopened     ← был ли переход DONE → не-DONE
             │
-            ▼ (+ cutoff filter)
+            ▼
     Metrics dict
-            cycleTimeDays, timeToMarketDays, throughput,
-            flowEfficiencyPercent, backlogSize, inProgressCount,
-            reopenedCount (только среди completed)
+            cycleTimeDays, timeToMarketDays, flowEfficiencyPercent,
+            throughput (выставляется ingestion), backlogSize,
+            inProgressCount, reopenedCount
+            │
+            ▼
+    SQLite snapshot
+            project_key, timestamp, metrics_json
+            │
+            ▼  GET /latest или GET /history
+    Browser (dashboard.html)
+            updateDashboard(metrics) + drawChart(snapshots)
 ```
-
----
-
-## Статусная модель
-
-Сравнения case-insensitive:
-
-```python
-STARTED = {"in progress", "selected for development", "в работе", "in development"}
-DONE    = {"done", "closed", "resolved", "выполнено", "complete"}
-```
-
-Changelog запрашивается для **всех** задач. Это необходимо для корректного определения задач в Done без `resolutiondate` (BUG-1) и задач, вернувшихся из In Progress в Backlog (BUG-4).
 
 ---
 
 ## Frontend (dashboard.html)
 
-Однофайловый, без сборки, без фреймворков.
+Однофайловый, без сборки, без фреймворков. Read-only UI.
+
+**Ключевые функции:**
+
+| Функция | Что делает |
+|---|---|
+| `refreshDashboard()` | GET /latest → updateDashboard + loadHistory; при 404 — auto-trigger POST /sync + polling |
+| `loadHistory()` | GET /history → drawChart + drawThroughputChart |
+| `_postSync()` | POST /sync — запускает фоновый ингест |
+| `_pollLatest(attempts)` | Поллинг GET /latest каждые 3s (до 20 попыток = ~60s) |
+| `updateDataAge(ts)` | Показывает "Updated Xm ago" в статус-строке |
+| `switchProject(id)` | Переключает таб → сбрасывает prevKpi → вызывает refreshDashboard |
+| `drawChart(snapshots)` | Рисует SVG-тренд Cycle Time из массива `{timestamp, metrics}` |
+| `drawThroughputChart(snapshots)` | Рисует SVG-тренд Throughput |
 
 **LocalStorage-ключи:**
 
@@ -97,22 +140,45 @@ Changelog запрашивается для **всех** задач. Это не
 | `ada:projects` | JSON: массив проектных табов |
 | `ada:activeId` | ID активного проекта |
 | `ada:period` | Активный period-фильтр |
-| `ada:runHistory` | JSON: последние 30 синков (ts + cycleTimeDays + throughput) |
 | `ada:sidebarCollapsed` | Булево: состояние сайдбара |
+
+`ada:runHistory` **удалён** — история хранится в SQLite, читается через API.
 
 ---
 
-## Масштабирование (следующие шаги)
-
-При росте сложности — разбить `server.py` на модули:
+## Auto-sync flow
 
 ```
-server.py      → app.py (роутинг)
-               + jira.py (fetch, pagination)
-               + metrics.py (calculate_metrics)
-               + ai.py (call_openai)
-               + telegram.py (send_telegram, chunking)
+refreshDashboard()
+    │
+    GET /latest?project=KEY
+    │
+    ├── 200 → updateDashboard(metrics) + loadHistory()
+    │
+    └── 404 → POST /sync (тихо)
+                │
+                _pollLatest(attempts=0)
+                │
+                каждые 3s: GET /latest
+                │
+                ├── 200 → refreshDashboard()  ← данные готовы
+                └── 404 → _pollLatest(attempts+1)  ← ждём ещё
+                           (до 20 попыток = ~60s, затем timeout)
 ```
 
-При появлении scheduled runs — добавить Flask + APScheduler или cron.
-При необходимости multi-source — расширить `_handle` для массива источников.
+---
+
+## Статусная модель Jira
+
+```python
+STARTED = {"in progress", "selected for development", "в работе", "in development"}
+DONE    = {"done", "closed", "resolved", "выполнено", "complete"}
+```
+
+Все сравнения case-insensitive (`.lower()`). Changelog запрашивается для всех задач.
+
+---
+
+## Legacy
+
+`server_app.py` (переименован из старого `server.py`) — сохранён для обратной совместимости. Эндпоинт `POST /webhook/sync-report` делегирует сюда. Не удалять — используется в legacy-интеграциях.

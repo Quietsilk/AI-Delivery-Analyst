@@ -1,18 +1,18 @@
 # AI Delivery Analyst
 
-An early-warning system for delivery risks. Connects to Jira, calculates metrics from changelog, analyses them via AI, and sends a report to Telegram — with zero manual effort.
+Система раннего обнаружения рисков доставки. Подключается к Jira, рассчитывает метрики из changelog, анализирует через OpenAI и отображает всё в браузерном дашборде — с фоновым синком и персистентным хранением снапшотов.
 
 ---
 
-## What it does
+## Что делает
 
-1. Fetches issues from Jira via JQL query (cursor-based pagination)
-2. Loads changelog for every issue in parallel (up to 10 threads)
-3. Calculates delivery metrics: Cycle Time, Lead Time, Throughput, Reopened
-4. Filters completed issues by period (7d / 30d / 90d / All)
-5. Analyses metrics via OpenAI → Summary, Risks, Actions
-6. Sends a report to Telegram (smart chunking ≤ 4096 chars)
-7. Displays everything in a browser dashboard in real time
+1. Забирает задачи из Jira по JQL (cursor-based пагинация)
+2. Загружает changelog каждой задачи параллельно (10 потоков)
+3. Рассчитывает delivery-метрики: Cycle Time, Time to Market, Flow Efficiency, Throughput, Reopened
+4. Сохраняет снапшот в SQLite (иммутабельно — только INSERT)
+5. Анализирует метрики через OpenAI → Summary, Risks, Actions (опционально)
+6. Дашборд читает снапшоты через REST API (read-only UI)
+7. Фоновый планировщик автоматически синхронизирует проекты по расписанию
 
 ---
 
@@ -23,149 +23,159 @@ An early-warning system for delivery risks. Connects to Jira, calculates metrics
 git clone https://github.com/Quietsilk/AI-Delivery-Analyst
 cd AI-Delivery-Analyst
 
-# 2. Configure environment (AI and Telegram are optional)
+# 2. Configure (AI и Telegram опциональны)
 cp .env.example .env
-# Edit .env
 
 # 3. Run
-./start.sh
+python3 server.py
 # → http://localhost:5678
 ```
 
-Jira credentials (URL, email, API token) are entered directly in the dashboard and stored in localStorage.
+Jira credentials вводятся в дашборде и хранятся в localStorage браузера.
+
+---
+
+## Стек
+
+- **Python 3.9+** — stdlib-only, zero dependencies
+- **SQLite** — персистентное хранение снапшотов через `server/storage.py`
+- **HTML/CSS/JS** — однофайловый дашборд, read-only UI
+- **Jira Cloud REST API** — `/rest/api/3/search/jql` + `/rest/api/3/issue/{key}/changelog`
+- **OpenAI Responses API** — модель `o4-mini`, опционально
+
+---
+
+## Структура проекта
+
+```
+ai-delivery-analyst/
+├── server.py                          # Тонкий HTTP-роутер
+├── server_app.py                      # Legacy pipeline (backward compat)
+├── server/
+│   ├── __init__.py
+│   ├── metrics.py                     # calculate_metrics(issues) — чистая функция
+│   ├── storage.py                     # SQLite CRUD (init, save, get_latest, get_history)
+│   ├── ingestion.py                   # fetch + metrics + throughput delta + save
+│   ├── api.py                         # HTTP handlers (GET /latest, GET /history, POST /sync)
+│   └── scheduler.py                   # Фоновый daemon-поток для автосинка
+├── ai-delivery-analyst-dashboard.html # UI (single file, read-only)
+├── tests/
+│   ├── test_server.py                 # 87 regression тестов (legacy)
+│   ├── test_metrics.py                # 15 тестов
+│   ├── test_storage.py                # 13 тестов
+│   ├── test_ingestion.py              # 8 тестов
+│   └── test_api.py                    # 8 тестов (108 итого)
+├── docs/
+│   ├── architecture.md
+│   ├── backlog.md
+│   └── risks.md
+├── specs/                             # Версионированные ТЗ
+├── .env.example
+└── .env                               # Локальные секреты (не в git)
+```
+
+---
+
+## API
+
+| Метод | Путь | Описание |
+|---|---|---|
+| `GET` | `/` | Дашборд HTML |
+| `GET` | `/latest?project=KEY` | Последний снапшот проекта |
+| `GET` | `/history?project=KEY&period=7d\|30d\|90d` | История снапшотов |
+| `POST` | `/sync` | Запустить ингест в фоне → `{ok, queued}` |
+| `POST` | `/webhook/sync-report` | Legacy endpoint (deprecated) |
+
+**GET /latest** — пример ответа:
+```json
+{
+  "ok": true,
+  "snapshot": {
+    "timestamp": "2026-04-25T12:00:00",
+    "metrics": {
+      "cycleTimeDays": 4.2,
+      "throughput": 23,
+      "timeToMarketDays": 8.7,
+      "reopenedCount": 0,
+      "flowEfficiencyPercent": 48.3
+    }
+  }
+}
+```
+
+**POST /sync** — пример запроса:
+```json
+{
+  "project": "KEY",
+  "baseUrl": "https://company.atlassian.net",
+  "email": "you@company.com",
+  "apiToken": "...",
+  "jql": "project = KEY ORDER BY updated DESC"
+}
+```
+
+---
+
+## Переменные окружения
+
+| Переменная | Назначение | По умолчанию |
+|---|---|---|
+| `DB_PATH` | Путь к SQLite-файлу | `snapshots.db` |
+| `SYNC_INTERVAL_SECONDS` | Интервал фонового синка | `3600` |
+| `PROJECTS` | JSON-массив проектов для планировщика | `[]` |
+| `OPENAI_API_KEY` | AI-анализ (опционально) | — |
+| `TELEGRAM_BOT_TOKEN` | Telegram (опционально, legacy) | — |
+| `TELEGRAM_CHAT_ID` | Telegram (опционально, legacy) | — |
+
+**Пример PROJECTS:**
+```json
+[{"project":"KEY","baseUrl":"https://co.atlassian.net","email":"x@co.com","apiToken":"...","jql":"project=KEY"}]
+```
+
+---
+
+## Метрики
+
+Все метрики рассчитываются из Jira changelog — не из статических полей.
+
+| Метрика | Определение | Хорошо | Плохо |
+|---|---|---|---|
+| **Cycle Time** | Среднее время от последнего "In Progress" до Done | ≤ 5d | ≥ 10d |
+| **Time to Market** | Среднее время от создания до Done | ≤ 10d | ≥ 20d |
+| **Flow Efficiency** | cycleTime / timeToMarket × 100%, кап 100% | ≥ 40% | ≤ 15% |
+| **Throughput** | Кол-во resolved с предыдущего снапшота | > 0 | = 0 |
+| **Reopened** | Задачи, вернувшиеся из Done | = 0 | > 2 |
+
+---
+
+## Тесты
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+108 тестов, zero external dependencies:
+
+| Файл | Тестов | Покрытие |
+|---|---|---|
+| `test_server.py` | 87 | Legacy pipeline |
+| `test_metrics.py` | 15 | `calculate_metrics` — edge cases, flow efficiency, parse_dt |
+| `test_storage.py` | 13 | SQLite CRUD, иммутабельность, фильтрация по периоду |
+| `test_ingestion.py` | 8 | Throughput delta, первый/второй снапшот |
+| `test_api.py` | 8 | HTTP handlers, 400/404/202 статусы |
+
+---
+
+## Архитектурные инварианты
+
+1. **UI read-only** — браузер только читает снапшоты, никогда не считает метрики
+2. **Иммутабельные снапшоты** — только INSERT в SQLite, никогда UPDATE/DELETE
+3. **Throughput = дельта** — кол-во resolved с `timestamp` предыдущего снапшота
+4. **Period без пересчёта** — `GET /history?period=30d` фильтрует строки по timestamp
+5. **`calculate_metrics` без period** — чистая функция, нет параметров cutoff/period
 
 ---
 
 ## Built with AI
 
-This project was built end-to-end using Claude (Anthropic) as the primary coding tool.
-The development process included iterative spec writing, code generation, bug discovery,
-test authoring, and QA — all driven through AI-assisted sessions.
-The goal was to demonstrate how a senior engineer can leverage AI coding tools
-to ship a production-quality tool faster and with higher test coverage than traditional solo development.
-
----
-
-## Stack
-
-- **Python 3.9+** — stdlib-only server, no dependencies (`pip install` not required)
-- **HTML/CSS/JS** — single-file dashboard, runs in the browser
-- **Jira Cloud REST API** — `/rest/api/3/search/jql` + `/rest/api/3/issue/{key}/changelog`
-- **OpenAI Responses API** — model `o4-mini`, optional
-- **Telegram Bot API** — report delivery, optional
-
----
-
-## Project structure
-
-```
-ai-delivery-analyst/
-├── server.py                          # HTTP server: routing, Jira, metrics, OpenAI, Telegram
-├── ai-delivery-analyst-dashboard.html # UI (single file)
-├── start.sh                           # Launch wrapper
-├── tests/
-│   └── test_server.py                 # 61 regression tests (stdlib unittest)
-├── docs/
-│   ├── architecture.md
-│   ├── backlog.md
-│   └── risks.md
-├── .env.example                       # Environment variable template
-└── .env                               # Local secrets (not in git)
-```
-
----
-
-## Environment variables
-
-| Variable | Description | Required |
-|---|---|---|
-| `OPENAI_API_KEY` | OpenAI key for AI analysis | No |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token | No |
-| `TELEGRAM_CHAT_ID` | Target chat or group ID | No |
-
-Jira credentials are entered in the UI and never stored on the server.
-
----
-
-## Metrics
-
-All metrics are calculated from Jira changelog — not from static fields.
-
-| Metric | Definition |
-|---|---|
-| **Cycle Time** | Average time from the last "In Progress" transition to completion |
-| **Lead Time** | Average time from issue creation to completion |
-| **Throughput** | Number of completed issues in the selected period (shown as "15 / 30d") |
-| **Reopened** | Count of completed issues that were previously returned from Done |
-
-Status sets (case-insensitive):
-
-```python
-STARTED = {"in progress", "selected for development", "в работе", "in development"}
-DONE    = {"done", "closed", "resolved", "выполнено", "complete"}
-```
-
----
-
-## Period filter
-
-The filter applies **only to completed issues** by `resolved_at` date.
-In Progress and Backlog always reflect the current state regardless of period.
-
----
-
-## AI analysis
-
-When `OPENAI_API_KEY` is set, the server calls `o4-mini` and returns:
-
-- **Summary** — 1–2 sentences on delivery health
-- **Risks** — specific risks with root causes
-- **Actions** — 3 recommended actions
-
-AI states in the dashboard:
-
-| State | Cause | UI shows |
-|---|---|---|
-| Analysis ready | OpenAI responded | Summary, Risks, Actions |
-| `AI unavailable: …` | API error (429, timeout) | Error text in all three panels |
-| `AI not configured` | `OPENAI_API_KEY` not set | Hint in panels |
-
----
-
-## Jira API
-
-The server uses the new `/rest/api/3/search/jql` endpoint (Jira Cloud):
-
-- `fieldsByKeys: true` is required to get `key` and named fields
-- Pagination via `nextPageToken` (cursor-based, not offset)
-- Changelog is fetched in parallel (up to 10 threads) for all issues
-
----
-
-## Tests
-
-```bash
-python3 -m unittest tests/test_server.py -v
-```
-
-61 tests, zero external dependencies. Coverage:
-
-| Group | Tests |
-|---|---|
-| `calculate_metrics` — empty, completed, WIP, backlog, cutoff, reopened, cycle/lead time, BUG-1/2/3, avg, negative cycle | 18 |
-| `call_openai` — output_text, choices fallback, retry 429, insufficient_quota, all retries exhausted, non-429 no retry, period_label | 8 |
-| `send_telegram` — single chunk, multi-chunk, error stops send, bot URL, payload shape | 5 |
-| `_split_telegram` — short text, newline/space split, hard cut, empty chunks | 7 |
-| `fetch_jira` — single page, cursor pagination, stop on small page | 3 |
-| HTTP integration — GET, 404, CORS, POST pipeline, 500, period=7d, throughputPeriodLabel, aiEnabled, aiError, response shape | 13 |
-| `_parse_dt` — Z, +00:00, +HH:MM, HHMM without colon, negative offset | 5 |
-| `load_env` — file load, missing file | 2 |
-
----
-
-## Known limitations
-
-- STARTED/DONE statuses are hardcoded in `server.py` (not configurable via UI)
-- Sync history is stored only in browser localStorage (up to 30 records)
-- Single JQL query per sync (multi-source not implemented)
-- No scheduled/cron execution — manual sync only via UI button
+Проект создан с использованием Claude (Anthropic) как основного инструмента разработки — итеративное написание ТЗ, генерация кода, обнаружение багов, написание тестов и QA.

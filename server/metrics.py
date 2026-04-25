@@ -33,6 +33,38 @@ def _avg_days(items, key_a, key_b):
     return round(sum(ds) / len(ds), 1) if ds else 0
 
 
+def _map_issue(issue):
+    """Extract timing fields from a single Jira issue with changelog."""
+    histories = issue.get("changelog", {}).get("histories", [])
+    transitions = sorted(
+        [
+            {"date": h["created"], "from": i.get("fromString", ""), "to": i.get("toString", "")}
+            for h in histories
+            for i in h.get("items", [])
+            if i.get("field") == "status"
+        ],
+        key=lambda t: t["date"]
+    )
+
+    last_done = next((t for t in reversed(transitions) if t["to"].lower() in DONE), None)
+    started   = next((t for t in reversed(transitions)
+                      if t["to"].lower() in STARTED
+                      and (not last_done or t["date"] <= last_done["date"])), None)
+    status    = (issue.get("fields") or {}).get("status", {}).get("name", "")
+    is_done   = status.lower() in DONE
+    resolved  = None
+    if is_done:
+        resolved = (issue.get("fields") or {}).get("resolutiondate") or (last_done["date"] if last_done else None)
+    reopened = any(t["from"].lower() in DONE and t["to"].lower() not in DONE for t in transitions)
+
+    return {
+        "started_at":  started["date"] if started else None,
+        "resolved_at": resolved,
+        "created_at":  (issue.get("fields") or {}).get("created"),
+        "reopened":    reopened,
+    }
+
+
 def calculate_metrics(issues):
     """Compute delivery metrics from a list of Jira issues with changelogs.
 
@@ -42,38 +74,10 @@ def calculate_metrics(issues):
 
     Returns a dict with keys:
         cycleTimeDays, timeToMarketDays, flowEfficiencyPercent,
-        throughput, backlogSize, inProgressCount, reopenedCount
+        throughput, backlogSize, inProgressCount, reopenedCount,
+        backlogAgingDays
     """
-    mapped = []
-    for issue in issues:
-        histories = issue.get("changelog", {}).get("histories", [])
-        transitions = sorted(
-            [
-                {"date": h["created"], "from": i.get("fromString", ""), "to": i.get("toString", "")}
-                for h in histories
-                for i in h.get("items", [])
-                if i.get("field") == "status"
-            ],
-            key=lambda t: t["date"]
-        )
-
-        last_done = next((t for t in reversed(transitions) if t["to"].lower() in DONE), None)
-        started   = next((t for t in reversed(transitions)
-                          if t["to"].lower() in STARTED
-                          and (not last_done or t["date"] <= last_done["date"])), None)
-        status    = (issue.get("fields") or {}).get("status", {}).get("name", "")
-        is_done   = status.lower() in DONE
-        resolved  = None
-        if is_done:
-            resolved = (issue.get("fields") or {}).get("resolutiondate") or (last_done["date"] if last_done else None)
-        reopened = any(t["from"].lower() in DONE and t["to"].lower() not in DONE for t in transitions)
-
-        mapped.append({
-            "started_at":  started["date"] if started else None,
-            "resolved_at": resolved,
-            "created_at":  (issue.get("fields") or {}).get("created"),
-            "reopened":    reopened,
-        })
+    mapped = [_map_issue(issue) for issue in issues]
 
     completed   = [i for i in mapped if i["resolved_at"]]
     in_progress = [i for i in mapped if i["started_at"] and not i["resolved_at"]]
@@ -83,6 +87,20 @@ def calculate_metrics(issues):
     lead  = _avg_days(completed, "created_at",  "resolved_at")
     flow_efficiency = round(min(cycle / lead * 100, 100.0), 1) if lead > 0 else 0
 
+    # Backlog aging: avg days from created_at to now for pure backlog issues
+    now = datetime.now(timezone.utc)
+    aging_vals = []
+    for i in backlog:
+        if i["created_at"]:
+            try:
+                created = _parse_dt(i["created_at"])
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                aging_vals.append((now - created).total_seconds() / 86400)
+            except Exception:
+                pass
+    backlog_aging = round(sum(aging_vals) / len(aging_vals), 1) if aging_vals else 0
+
     return {
         "cycleTimeDays":         cycle,
         "timeToMarketDays":      lead,
@@ -91,4 +109,5 @@ def calculate_metrics(issues):
         "backlogSize":           len(backlog),
         "inProgressCount":       len(in_progress),
         "reopenedCount":         sum(1 for i in completed if i["reopened"]),
+        "backlogAgingDays":      backlog_aging,
     }

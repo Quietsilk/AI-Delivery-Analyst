@@ -2,55 +2,53 @@
 
 ## В работе / ближайшее
 
-- [ ] Настройка scheduled daily run (cron или launchd)
+- [ ] Конфигурация STARTED/DONE статусов через UI (сейчас — хардкод в server_app.py)
 - [ ] Multi-source: несколько Jira-проектов в одном синке с агрегированными метриками
-- [ ] Конфигурация STARTED/DONE статусов через UI (сейчас — хардкод в server.py)
+- [ ] Full UI/UX redesign (visual hierarchy: hero KPI → secondary row → AI insight → actions → charts)
 
 ## Метрики и аналитика
 
-- [ ] Flow efficiency (active time / lead time)
 - [ ] Aging WIP — задачи в In Progress дольше threshold
 - [ ] Blocked issues — детектирование по метке или статусу
-- [ ] Trend по периодам (сравнение 30d vs предыдущие 30d)
+- [ ] Сравнение периодов (30d vs предыдущие 30d) на основе снапшотов
 - [ ] Story points в метриках (velocity, scope completion)
 
 ## Инфраструктура
 
-- [ ] Разбивка server.py на модули (jira.py, metrics.py, ai.py, telegram.py) — при росте >500 строк
-- [ ] Переход на Flask при появлении ≥2 новых эндпоинтов
-- [ ] Persistent storage для истории синков (SQLite) — сейчас только localStorage
 - [ ] Docker-образ для деплоя
+- [ ] Migrate legacy `/webhook/sync-report` на новый pipeline (убрать блокирующий HTTP)
+- [ ] Конфигурация PROJECTS через UI (сейчас только через env)
+- [ ] Экспорт истории снапшотов в CSV / PDF
 
 ## Интеграции
 
-- [ ] Slack webhook (код заготовлен, не тестировался)
-- [ ] Scrum: Jira Agile API для sprint predictability (был в TypeScript-прототипе)
-- [ ] Экспорт отчёта в PDF / Confluence
+- [ ] Scrum: Jira Agile API для sprint predictability
+- [ ] Slack webhook (код заготовлен в legacy, не тестировался)
+- [ ] Confluence: публикация отчёта
 
 ## Готово ✅
 
-- [x] Flow Efficiency (5-я KPI-карточка, amber, ≥40%/≤15%), формула: cycleTime/timeToMarket×100, кап 100%
-- [x] Lead Time → Time to Market (переименование везде: server, JSON, Telegram, OpenAI, HTML, тесты)
-- [x] Throughput — убран / period label из карточки (период виден в picker'е)
-- [x] UX overhaul: KPI-акценты, collapsible sidebar, empty state, period bar, AI/Risks иерархия, favicon
-- [x] Автосинк при смене периода (без ручного нажатия Sync)
+- [x] Tab switch: переключение проекта автоматически загружает данные (`switchProject` async + `refreshDashboard`)
+- [x] Архитектурный рефакторинг (апрель 2026): `server/` пакет, SQLite, read-only UI, 108 тестов
+- [x] Persistent storage: SQLite снапшоты, иммутабельные строки, история бессрочно
+- [x] Background scheduler: daemon-поток, `PROJECTS` env, `SYNC_INTERVAL_SECONDS`
+- [x] Auto-sync + polling: GET /latest → 404 → POST /sync → poll 3s → auto-refresh
+- [x] Throughput = дельта: кол-во resolved с предыдущего снапшота
+- [x] Read-only UI: браузер только читает GET /latest и GET /history
+- [x] POST /sync → 202 queued (без метрик в ответе)
+- [x] Flow Efficiency (5-я KPI, amber, формула: cycleTime/timeToMarket×100, кап 100%)
+- [x] Lead Time → Time to Market (rename везде: server, JSON, HTML, тесты)
+- [x] Throughput — убран period label из карточки
+- [x] UX overhaul: KPI-акценты, collapsible sidebar, empty state, period bar
+- [x] Автосинк при смене периода (только перезагружает историю, не KPI)
 - [x] Восстановление connected-состояния при обновлении страницы
-- [x] Подавление CSS-transition сайдбара при загрузке страницы (layout jerk)
-- [x] Jira pagination (PAGE_SIZE=50, isLast loop)
-- [x] Period-фильтр (7d/30d/90d/all), server-side cutoff
-- [x] Changelog fetch для всех задач (покрывает Done без resolutiondate и In Progress → Backlog)
+- [x] Jira pagination (PAGE_SIZE=50, cursor-based)
+- [x] Changelog fetch для всех задач
 - [x] Case-insensitive статусная модель
-- [x] localStorage-персистентность (credentials, projects, history, period)
 - [x] Smart Telegram chunking (split по \n / пробел / hard cut)
-- [x] aiEnabled флаг в ответе (честный placeholder при отсутствии ключа)
-- [x] Regression suite: 61 тест, stdlib unittest, zero deps (добавлены call_openai, send_telegram, edge cases)
-- [x] Архитектурный pivot: TypeScript → Python
-- [x] Переименование Predictability → Done Rate (корректное определение метрики)
-- [x] Throughput с меткой периода (15 / 30d) в UI и Telegram
-- [x] KPI-карточка Reopened в дашборде (красная при > 0)
-- [x] График тренда Throughput рядом с Cycle Time
+- [x] Regression suite: 108 тестов, stdlib unittest, zero deps
 - [x] BUG-1: Done без resolutiondate корректно попадает в Throughput
-- [x] BUG-2: Cycle Time от последнего старта перед done, не от первого
+- [x] BUG-2: Cycle Time от последнего старта перед done
 - [x] BUG-3: Reopened фильтруется по периоду (только среди completed)
-- [x] BUG-4: Задачи In Progress → Backlog видимы (changelog фетчится для всех)
-- [x] BUG-5: Удалён дублирующий completedCount, оставлен throughput
+- [x] BUG-4: Задачи In Progress → Backlog видимы (changelog для всех)
+- [x] BUG-5: Удалён дублирующий completedCount

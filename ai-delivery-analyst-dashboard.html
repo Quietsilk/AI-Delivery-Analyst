@@ -84,6 +84,7 @@
       letter-spacing: 0.02em;
       color: var(--text);
       white-space: nowrap;
+      opacity: 0.7;
     }
     .app-logo span { color: var(--accent); }
 
@@ -138,8 +139,8 @@
 
     /* ── Sidebar ─────────────────────────────────────────── */
     .sidebar {
-      background: var(--surface);
-      border-right: 1px solid var(--border);
+      background: rgba(19,22,28,0.6);
+      border-right: 1px solid rgba(255,255,255,0.05);
       display: flex;
       flex-direction: column;
       overflow-y: auto;
@@ -397,7 +398,7 @@
 
     .kpi-bottom { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 
-    .kpi-value { font-size: 1.5rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }
+    .kpi-value { font-size: 1.9rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }
 
     .kpi-delta { font-size: 0.74rem; font-weight: 600; color: var(--muted); }
     .kpi-delta.delta-good { color: var(--green); }
@@ -445,14 +446,33 @@
     }
 
     .panel ul { padding-left: 16px; display: flex; flex-direction: column; gap: 6px; }
-    .panel li { font-size: 0.82rem; color: var(--text); line-height: 1.5; }
-    .panel p  { font-size: 0.82rem; color: var(--text); line-height: 1.65; }
+    .panel li { font-size: 0.85rem; color: var(--text); line-height: 1.65; }
+    .panel p  { font-size: 0.85rem; color: var(--text); line-height: 1.75; }
 
     .actions-list { columns: 2; column-gap: 24px; padding-left: 16px; }
     .actions-list li { font-size: 0.82rem; color: var(--text); line-height: 1.5; margin-bottom: 6px; break-inside: avoid; }
 
+    /* System Health */
+    .health-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 4px;
+    }
+    .health-item {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .health-label { font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .health-value { font-size: 1.4rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }
+    .health-sub   { font-size: 0.68rem; color: var(--muted); }
+
+    @media (max-width: 600px) { .health-row { grid-template-columns: 1fr 1fr; } }
+
     /* Chart */
-    .chart-panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    .chart-panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; opacity: 0.82; transition: opacity 0.2s; }
+    .chart-panel:hover { opacity: 1; }
 
     .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-shrink: 0; }
     .chart-title   { font-size: 0.76rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
@@ -497,12 +517,11 @@
   <!-- App bar -->
   <header class="app-bar">
     <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle settings">☰</button>
-    <span class="app-logo">AI <span>Delivery</span> Analyst</span>
-    <div class="app-bar-sep"></div>
+    <button class="run-btn" id="refresh-button" disabled>Sync</button>
+    <span class="chip chip-idle" id="report-send-chip" style="display:none"></span>
     <span class="chip chip-idle" id="jira-connection-chip">Not connected</span>
     <div class="app-bar-spacer"></div>
-    <span class="chip chip-idle" id="report-send-chip" style="display:none"></span>
-    <button class="run-btn" id="run-report-button" disabled title="Fetches Jira issues → calculates metrics → AI analysis → Telegram report">Sync &amp; Analyse</button>
+    <span class="app-logo">AI <span>Delivery</span> Analyst</span>
   </header>
 
   <div class="app-body" id="app-body">
@@ -545,7 +564,7 @@
       <!-- Last run -->
       <div class="sidebar-section">
         <span class="sidebar-label">Last Run</span>
-        <p class="muted-text" id="last-run-status">Connect Jira and press Sync &amp; Analyse.</p>
+        <p class="muted-text" id="last-run-status">Connect Jira and press Sync.</p>
       </div>
 
     </aside>
@@ -579,7 +598,7 @@
         <div class="empty-state" id="empty-state">
           <div class="empty-icon">📊</div>
           <div class="empty-title">No data yet</div>
-          <div class="empty-body">Connect Jira, select a project and press <strong>Sync &amp; Analyse</strong></div>
+          <div class="empty-body">Connect Jira, select a project and press <strong>Sync</strong></div>
         </div>
 
         <!-- KPI row -->
@@ -608,12 +627,12 @@
               <span class="kpi-delta" id="kpi-ttm-delta"></span>
             </div>
           </div>
-          <div class="kpi-card kpi-accent-red" id="kpi-reopened-card">
-            <div class="kpi-label">Reopened</div>
-            <div class="kpi-sublabel">bounced back from Done</div>
+          <div class="kpi-card kpi-accent-red" id="kpi-predictability-card">
+            <div class="kpi-label">Predictability</div>
+            <div class="kpi-sublabel">completed / committed (30d)</div>
             <div class="kpi-bottom">
-              <span class="kpi-value" id="kpi-reopened-value">—</span>
-              <span class="kpi-delta" id="kpi-reopened-delta"></span>
+              <span class="kpi-value" id="kpi-predictability-value">—</span>
+              <span class="kpi-delta" id="kpi-predictability-delta"></span>
             </div>
           </div>
           <div class="kpi-card kpi-accent-amber" id="kpi-flow-eff-card">
@@ -622,6 +641,28 @@
             <div class="kpi-bottom">
               <span class="kpi-value" id="kpi-flow-eff-value">—</span>
               <span class="kpi-delta" id="kpi-flow-eff-delta"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- System Health -->
+        <div class="panel system-health hidden" id="system-health-panel">
+          <div class="panel-title">System Health</div>
+          <div class="health-row">
+            <div class="health-item">
+              <span class="health-label">WIP Ratio</span>
+              <span class="health-value" id="health-wip-ratio">—</span>
+              <span class="health-sub">WIP / throughput</span>
+            </div>
+            <div class="health-item">
+              <span class="health-label">Backlog Aging</span>
+              <span class="health-value" id="health-backlog-aging">—</span>
+              <span class="health-sub">avg days in backlog</span>
+            </div>
+            <div class="health-item">
+              <span class="health-label">Reopen Rate</span>
+              <span class="health-value" id="health-reopen-rate">—</span>
+              <span class="health-sub">tickets bounced from Done</span>
             </div>
           </div>
         </div>
@@ -689,10 +730,10 @@
   </div>
 
   <script>
-    const CONFIG = { telegramWebhookUrl: "http://localhost:5678/webhook/sync-report" };
+    const SERVER_BASE = "http://localhost:5678";
 
     if (window.location.protocol === "file:") {
-      window.location.replace("http://localhost:5678");
+      window.location.replace(SERVER_BASE);
     }
 
     // ── Projects ──────────────────────────────────────────────
@@ -777,13 +818,18 @@
       input.addEventListener("blur", confirm);
     }
 
-    function switchProject(id) {
+    async function switchProject(id) {
       activeId = id;
       const p = active();
       jiraJqlInput.value = p ? p.jql : "";
       document.getElementById("active-project-hint").textContent = p ? "Project: " + p.label : "";
       LS.saveState();
       renderTabs();
+      if (p && jiraConnected) {
+        lastRunStatusNode.textContent = "Switching project…";
+        prevKpi = null;
+        await refreshDashboard();
+      }
     }
 
     function removeProject(id) {
@@ -799,7 +845,7 @@
     }
 
     // ── DOM refs ──────────────────────────────────────────────
-    const runButton            = document.getElementById("run-report-button");
+    const runButton            = document.getElementById("refresh-button");
     const connectButton        = document.getElementById("connect-jira-button");
     const toggleTokenBtn       = document.getElementById("toggle-token-visibility-button");
     const reportSendChip       = document.getElementById("report-send-chip");
@@ -816,7 +862,6 @@
 
     let jiraConnected   = false;
     let prevKpi         = null;
-    let runHistory      = [];
     let activePeriod    = "30d";
     let sidebarCollapsed = false;
 
@@ -837,13 +882,12 @@
     // ── Persistence (localStorage) ────────────────────────────────
     const LS = {
       KEYS: {
-        baseUrl:   "ada:baseUrl",
-        email:     "ada:email",
-        token:     "ada:token",
-        projects:  "ada:projects",
-        activeId:  "ada:activeId",
-        period:    "ada:period",
-        history:   "ada:runHistory",
+        baseUrl:  "ada:baseUrl",
+        email:    "ada:email",
+        token:    "ada:token",
+        projects: "ada:projects",
+        activeId: "ada:activeId",
+        period:   "ada:period",
       },
       save(key, val) {
         try { localStorage.setItem(key, typeof val === "string" ? val : JSON.stringify(val)); }
@@ -863,7 +907,6 @@
         this.save(this.KEYS.projects, projects);
         this.save(this.KEYS.activeId, activeId);
         this.save(this.KEYS.period,   activePeriod);
-        this.save(this.KEYS.history,  runHistory.slice(-30).map(r => ({ ts: r.ts, v: r.v, t: r.t ?? 0 })));
       },
     };
 
@@ -888,15 +931,13 @@
         b.classList.toggle("active", b.dataset.period === savedPeriod)
       );
 
-      const savedHistory = LS.load(LS.KEYS.history, []);
-      if (Array.isArray(savedHistory) && savedHistory.length) {
-        runHistory = savedHistory.map(r => ({ ts: new Date(r.ts), v: r.v, t: r.t ?? 0 }));
-      }
-
       sidebarCollapsed = LS.load("ada:sidebarCollapsed", false);
       applySidebarState(false);
 
-      if (!validate()) setConnected(true, "Connected");
+      if (!validate()) {
+        setConnected(true, "Connected");
+        refreshDashboard();
+      }
     }
 
     // ── Chip helpers ──────────────────────────────────────────
@@ -957,24 +998,27 @@
       setConnected(false, "Settings changed — reconnect.");
     }
 
-    // ── Chart ─────────────────────────────────────────────────
-    function drawChart() {
+    // ── Charts ────────────────────────────────────────────────
+    // snapshots: [{ timestamp: "ISO", metrics: { cycleTimeDays, throughput, … } }, …]
+
+    function drawChart(snapshots) {
       const content = document.getElementById("chart-content");
-      if (runHistory.length === 0) {
+      if (!snapshots || snapshots.length === 0) {
         content.innerHTML = '<text x="490" y="100" fill="rgba(255,255,255,0.2)" font-size="11" text-anchor="middle">Run a sync to see the trend</text>';
         return;
       }
 
       const xL = 20, xR = 966, yT = 25, yB = 170;
-      const n = runHistory.length;
-      const maxV = Math.max(...runHistory.map(r => r.v)) * 1.25 || 1;
+      const n = snapshots.length;
+      const vals = snapshots.map(s => s.metrics.cycleTimeDays);
+      const maxV = Math.max(...vals) * 1.25 || 1;
 
       const px = i => xL + (i / Math.max(n - 1, 1)) * (xR - xL);
       const py = v  => yB - (v / maxV) * (yB - yT);
 
-      const ptsArr = runHistory.map((r, i) => [px(i), py(r.v)]);
+      const ptsArr  = vals.map((v, i) => [px(i), py(v)]);
       const linePts = ptsArr.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-      const areaD = `M${linePts.replace(/ /g, " L")} L${ptsArr[n-1][0].toFixed(1)},${yB} L${ptsArr[0][0].toFixed(1)},${yB} Z`;
+      const areaD   = `M${linePts.replace(/ /g, " L")} L${ptsArr[n-1][0].toFixed(1)},${yB} L${ptsArr[0][0].toFixed(1)},${yB} Z`;
 
       const grid = [0.25, 0.5, 0.75, 1.0].map(f => {
         const v = maxV * f, y = py(v);
@@ -986,12 +1030,12 @@
         `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#5b9cf6" stroke="#0d0f13" stroke-width="1.5"/>`
       ).join("");
 
-      const fmt = ts => ts.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-      let xLabels = `<text x="${xL}" y="198" fill="rgba(255,255,255,0.2)" font-size="9">${fmt(runHistory[0].ts)}</text>`;
-      if (n > 1) xLabels += `<text x="${xR}" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="end">${fmt(runHistory[n-1].ts)}</text>`;
+      const fmt = ts => new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+      let xLabels = `<text x="${xL}" y="198" fill="rgba(255,255,255,0.2)" font-size="9">${fmt(snapshots[0].timestamp)}</text>`;
+      if (n > 1) xLabels += `<text x="${xR}" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="end">${fmt(snapshots[n-1].timestamp)}</text>`;
       if (n > 2) {
         const m = Math.floor(n / 2);
-        xLabels += `<text x="490" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="middle">${fmt(runHistory[m].ts)}</text>`;
+        xLabels += `<text x="490" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="middle">${fmt(snapshots[m].timestamp)}</text>`;
       }
 
       content.innerHTML =
@@ -1001,9 +1045,9 @@
         dots + xLabels;
     }
 
-    function drawThroughputChart() {
+    function drawThroughputChart(snapshots) {
       const content = document.getElementById("chart-throughput-content");
-      const pts = runHistory.filter(r => r.t != null);
+      const pts = (snapshots || []).filter(s => s.metrics.throughput != null);
       if (pts.length === 0) {
         content.innerHTML = '<text x="490" y="100" fill="rgba(255,255,255,0.2)" font-size="11" text-anchor="middle">Run a sync to see the trend</text>';
         return;
@@ -1011,14 +1055,14 @@
 
       const xL = 20, xR = 966, yT = 25, yB = 170;
       const n = pts.length;
-      const maxV = Math.max(...pts.map(r => r.t)) * 1.25 || 1;
+      const maxV = Math.max(...pts.map(s => s.metrics.throughput)) * 1.25 || 1;
 
       const px = i => xL + (i / Math.max(n - 1, 1)) * (xR - xL);
       const py = v  => yB - (v / maxV) * (yB - yT);
 
-      const ptsArr = pts.map((r, i) => [px(i), py(r.t)]);
+      const ptsArr  = pts.map((s, i) => [px(i), py(s.metrics.throughput)]);
       const linePts = ptsArr.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-      const areaD = `M${linePts.replace(/ /g, " L")} L${ptsArr[n-1][0].toFixed(1)},${yB} L${ptsArr[0][0].toFixed(1)},${yB} Z`;
+      const areaD   = `M${linePts.replace(/ /g, " L")} L${ptsArr[n-1][0].toFixed(1)},${yB} L${ptsArr[0][0].toFixed(1)},${yB} Z`;
 
       const grid = [0.25, 0.5, 0.75, 1.0].map(f => {
         const v = maxV * f, y = py(v);
@@ -1030,12 +1074,12 @@
         `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#3ecf8e" stroke="#0d0f13" stroke-width="1.5"/>`
       ).join("");
 
-      const fmt = ts => ts.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-      let xLabels = `<text x="${xL}" y="198" fill="rgba(255,255,255,0.2)" font-size="9">${fmt(pts[0].ts)}</text>`;
-      if (n > 1) xLabels += `<text x="${xR}" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="end">${fmt(pts[n-1].ts)}</text>`;
+      const fmt = ts => new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+      let xLabels = `<text x="${xL}" y="198" fill="rgba(255,255,255,0.2)" font-size="9">${fmt(pts[0].timestamp)}</text>`;
+      if (n > 1) xLabels += `<text x="${xR}" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="end">${fmt(pts[n-1].timestamp)}</text>`;
       if (n > 2) {
         const m = Math.floor(n / 2);
-        xLabels += `<text x="490" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="middle">${fmt(pts[m].ts)}</text>`;
+        xLabels += `<text x="490" y="198" fill="rgba(255,255,255,0.2)" font-size="9" text-anchor="middle">${fmt(pts[m].timestamp)}</text>`;
       }
 
       content.innerHTML =
@@ -1072,12 +1116,12 @@
     // ── Run ───────────────────────────────────────────────────
     function revealContent() {
       document.getElementById("empty-state")?.remove();
-      document.querySelectorAll(".kpi-row, .chart-two-col, .two-col, #actions-panel")
+      document.querySelectorAll(".kpi-row, .chart-two-col, .two-col, #actions-panel, #system-health-panel")
         .forEach(el => el.classList.remove("hidden"));
     }
 
     function flashKpi() {
-      ["kpi-cycle-time-card","kpi-throughput-card","kpi-ttm-card","kpi-reopened-card","kpi-flow-eff-card"]
+      ["kpi-cycle-time-card","kpi-throughput-card","kpi-ttm-card","kpi-predictability-card","kpi-flow-eff-card"]
         .forEach((id, i) => setTimeout(() => {
           const el = document.getElementById(id);
           el.classList.remove("flashing");
@@ -1114,10 +1158,12 @@
       document.getElementById("kpi-throughput-value").textContent = d.throughput;
       document.getElementById("kpi-ttm-value").textContent        = (d.timeToMarketDays ?? 0).toFixed(1) + "d";
 
+      const predictability = d.predictabilityPercent ?? 0;
+      document.getElementById("kpi-predictability-value").textContent = predictability.toFixed(1) + "%";
+      document.getElementById("kpi-predictability-card")
+        .classList.toggle("kpi-status-bad", predictability < 70);
+
       const reopened = d.reopenedCount ?? 0;
-      document.getElementById("kpi-reopened-value").textContent = reopened;
-      const reopenedCard = document.getElementById("kpi-reopened-card");
-      reopenedCard.classList.toggle("kpi-warn", reopened > 0);
 
       const flowEff = d.flowEfficiencyPercent ?? 0;
       document.getElementById("kpi-flow-eff-value").textContent = flowEff.toFixed(1) + "%";
@@ -1125,16 +1171,22 @@
       setDelta("kpi-cycle-time-delta", d.cycleTimeDays,       prevKpi?.cycleTimeDays ?? null,        true,  "d");
       setDelta("kpi-throughput-delta", d.throughput,          prevKpi?.throughput ?? null,           false, "");
       setDelta("kpi-ttm-delta",        d.timeToMarketDays,    prevKpi?.timeToMarketDays ?? null,     true,  "d");
-      setDelta("kpi-reopened-delta",   reopened,              prevKpi?.reopenedCount ?? null,        true,  "");
+      setDelta("kpi-predictability-delta", predictability, prevKpi?.predictabilityPercent ?? null, false, "%");
       setDelta("kpi-flow-eff-delta",   flowEff,               prevKpi?.flowEfficiencyPercent ?? null, false, "%");
 
-      setKpiStatus("kpi-cycle-time-card", d.cycleTimeDays,    5,  10);
-      setKpiStatus("kpi-ttm-card",        d.timeToMarketDays, 10, 20);
-      setKpiStatus("kpi-flow-eff-card",   flowEff,            40, 15,  true);
+      setKpiStatus("kpi-cycle-time-card",     d.cycleTimeDays,    5,  10);
+      setKpiStatus("kpi-ttm-card",            d.timeToMarketDays, 10, 20);
+      setKpiStatus("kpi-flow-eff-card",       flowEff,            40, 15, true);
+      setKpiStatus("kpi-predictability-card", predictability,     80, 70, true);
       document.getElementById("kpi-throughput-card")
         .classList.toggle("kpi-status-bad", d.throughput === 0);
 
-      runButton.textContent = d.aiEnabled ? "Sync & Analyse" : "Sync";
+      // System Health panel
+      document.getElementById("health-wip-ratio").textContent =
+        (d.wipRatio ?? 0).toFixed(1);
+      document.getElementById("health-backlog-aging").textContent =
+        (d.backlogAgingDays ?? 0).toFixed(0) + "d";
+      document.getElementById("health-reopen-rate").textContent = reopened;
 
       prevKpi = { ...d };
 
@@ -1172,73 +1224,160 @@
         document.getElementById("actions-placeholder").textContent = noAiMsg;
       }
 
-      runHistory.push({ ts: new Date(), v: d.cycleTimeDays, t: d.throughput });
-      LS.saveState();
-      drawChart();
-      drawThroughputChart();
       flashKpi();
     }
 
-    async function runReport() {
+    // ── Sync flow (button action: always POST /sync → poll) ───
+    async function runSyncFlow() {
       if (!jiraConnected) return;
       const syncErr = validateSync();
-      if (syncErr) {
-        lastRunStatusNode.textContent = syncErr;
-        return;
-      }
-      const endpoint = (CONFIG.telegramWebhookUrl || "").trim();
-      if (!endpoint) {
-        lastRunStatusNode.textContent = "Error: set telegramWebhookUrl in CONFIG.";
-        return;
-      }
+      if (syncErr) { lastRunStatusNode.textContent = syncErr; return; }
 
       runButton.disabled = true;
       setRunChip("pending", "Syncing…");
+      lastRunStatusNode.textContent = "Syncing Jira data…";
+      syncBannerNode.className = "sync-banner";
+
+      try {
+        await _postSync();
+        _pollLatest();
+      } catch (e) {
+        setRunChip("error", "Failed");
+        lastRunStatusNode.textContent = "Sync error: " + e.message;
+        showBanner("Sync error: " + e.message, false);
+        runButton.disabled = false;
+      }
+    }
+
+    // ── API: GET /latest + GET /history + POST /sync ─────────
+    let _pollTimer = null;
+
+    async function _postSync() {
+      const p = active();
+      if (!p || validateSync()) return;
+      try {
+        await fetch(`${SERVER_BASE}/sync`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project:  p.label,
+            baseUrl:  jiraBaseUrlInput.value.trim(),
+            email:    jiraEmailInput.value.trim(),
+            apiToken: jiraTokenInput.value.trim(),
+            jql:      jiraJqlInput.value.trim(),
+          }),
+        });
+      } catch (_) {}
+    }
+
+    function _pollLatest(attempts = 0) {
+      clearTimeout(_pollTimer);
+      if (attempts >= 20) {
+        setRunChip("error", "Timeout");
+        lastRunStatusNode.textContent = "Sync is taking a while — try again manually";
+        runButton.disabled = false;
+        return;
+      }
+      const dots = ".".repeat((attempts % 3) + 1);
+      lastRunStatusNode.textContent = `Syncing Jira data${dots}`;
+      _pollTimer = setTimeout(async () => {
+        const p = active();
+        if (!p) { runButton.disabled = false; return; }
+        try {
+          const res = await fetch(`${SERVER_BASE}/latest?project=${encodeURIComponent(p.label)}`);
+          if (res.ok) { refreshDashboard(); }
+          else { _pollLatest(attempts + 1); }
+        } catch (_) { _pollLatest(attempts + 1); }
+      }, 3000);
+    }
+
+    async function refreshDashboard() {
+      if (!jiraConnected) return;
+      const p = active();
+      if (!p) { lastRunStatusNode.textContent = "No project selected."; return; }
+
+      clearTimeout(_pollTimer);
+      runButton.disabled = true;
+      setRunChip("pending", "Loading…");
       lastRunStatusNode.textContent = "Syncing with Jira…";
       syncBannerNode.className = "sync-banner";
 
       try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            baseUrl:      jiraBaseUrlInput.value.trim(),
-            email:        jiraEmailInput.value.trim(),
-            apiToken:     jiraTokenInput.value.trim(),
-            jql:          jiraJqlInput.value.trim(),
-            period:       activePeriod,
-            projectName:  active()?.label || "",
-          })
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const payload = await res.json();
-        if (!payload.ok || !payload.dashboard) throw new Error("Invalid response");
+        const res = await fetch(`${SERVER_BASE}/latest?project=${encodeURIComponent(p.label)}`);
 
-        updateDashboard(payload.dashboard);
+        if (res.status === 404) {
+          setRunChip("pending", "Syncing…");
+          showBanner("No snapshot found — syncing Jira data…", true);
+          await _postSync();
+          _pollLatest();
+          return;
+        }
+
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const body = await res.json();
+        if (!body.ok) throw new Error(body.error || "Server error");
+
+        updateDashboard(body.snapshot.metrics);
+        updateDataAge(body.snapshot.timestamp);
+        await loadHistory();
+
         const t = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-        setRunChip("success", "Sent");
-        lastRunStatusNode.textContent = t + " — success";
-        showBanner("Synced at " + t, true);
+        setRunChip("success", "Loaded");
+        lastRunStatusNode.textContent = t + " — data loaded";
+        showBanner("Refreshed at " + t, true);
         setTimeout(() => setRunChip("idle", ""), 3000);
       } catch (e) {
         setRunChip("error", "Failed");
         const t = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-        lastRunStatusNode.textContent = t + " — error: " + e.message;
+        lastRunStatusNode.textContent = t + " — " + e.message;
         showBanner("Sync error: " + e.message, false);
       } finally {
         runButton.disabled = false;
       }
     }
 
+    async function loadHistory() {
+      const p = active();
+      if (!p) return;
+      const periodParam = activePeriod === "all" ? "" : `&period=${activePeriod}`;
+      try {
+        const res = await fetch(`${SERVER_BASE}/history?project=${encodeURIComponent(p.label)}${periodParam}`);
+        if (!res.ok) return;
+        const body = await res.json();
+        if (!body.ok || !Array.isArray(body.snapshots)) return;
+        drawChart(body.snapshots);
+        drawThroughputChart(body.snapshots);
+      } catch (_) {}
+    }
+
+    // ── Data age ──────────────────────────────────────────────
+    function updateDataAge(timestamp) {
+      const el = document.getElementById("data-age-status");
+      if (!el) return;
+      if (!timestamp) { el.textContent = ""; return; }
+      const diff = Date.now() - new Date(timestamp).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1)        el.textContent = "Updated just now";
+      else if (mins < 60)  el.textContent = `Updated ${mins}m ago`;
+      else {
+        const hrs = Math.floor(mins / 60);
+        el.textContent = hrs < 24 ? `Updated ${hrs}h ago` : `Updated ${Math.floor(hrs / 24)}d ago`;
+      }
+    }
+
     // ── Demo data ─────────────────────────────────────────────
     function loadDemoData() {
-      const snapshots = [
-        { cycleTimeDays: 6.1, throughput: 14, throughputPeriodLabel: "30d", timeToMarketDays: 11.4, reopenedCount: 2, flowEfficiencyPercent: 53.5 },
-        { cycleTimeDays: 5.7, throughput: 16, throughputPeriodLabel: "30d", timeToMarketDays: 10.8, reopenedCount: 1, flowEfficiencyPercent: 52.8 },
-        { cycleTimeDays: 4.9, throughput: 19, throughputPeriodLabel: "30d", timeToMarketDays: 9.3,  reopenedCount: 0, flowEfficiencyPercent: 52.7 },
-        { cycleTimeDays: 5.3, throughput: 17, throughputPeriodLabel: "30d", timeToMarketDays: 9.9,  reopenedCount: 3, flowEfficiencyPercent: 53.5 },
-        { cycleTimeDays: 4.2, throughput: 23, throughputPeriodLabel: "30d", timeToMarketDays: 8.7,  reopenedCount: 0, flowEfficiencyPercent: 48.3 },
-      ];
+      const base = Date.now() - 5 * 3 * 24 * 60 * 60 * 1000;
+      const demoSnapshots = [
+        { cycleTimeDays: 6.1, throughput: 14, timeToMarketDays: 11.4, reopenedCount: 2, flowEfficiencyPercent: 53.5, predictabilityPercent: 64.3, wipRatio: 2.1, backlogAgingDays: 28 },
+        { cycleTimeDays: 5.7, throughput: 16, timeToMarketDays: 10.8, reopenedCount: 1, flowEfficiencyPercent: 52.8, predictabilityPercent: 68.8, wipRatio: 1.9, backlogAgingDays: 25 },
+        { cycleTimeDays: 4.9, throughput: 19, timeToMarketDays: 9.3,  reopenedCount: 0, flowEfficiencyPercent: 52.7, predictabilityPercent: 73.7, wipRatio: 1.6, backlogAgingDays: 22 },
+        { cycleTimeDays: 5.3, throughput: 17, timeToMarketDays: 9.9,  reopenedCount: 3, flowEfficiencyPercent: 53.5, predictabilityPercent: 70.6, wipRatio: 1.8, backlogAgingDays: 24 },
+        { cycleTimeDays: 4.2, throughput: 23, timeToMarketDays: 8.7,  reopenedCount: 0, flowEfficiencyPercent: 48.3, predictabilityPercent: 82.6, wipRatio: 1.3, backlogAgingDays: 18 },
+      ].map((m, i) => ({
+        timestamp: new Date(base + i * 3 * 24 * 60 * 60 * 1000).toISOString(),
+        metrics: m,
+      }));
 
       const analysis =
         "Summary: Flow is stabilising but QA remains the primary bottleneck — cycle time improved 31% over 5 syncs.\n" +
@@ -1251,14 +1390,16 @@
         "- Reduce next sprint scope by 15% to align with measured velocity\n" +
         "- Run a 30-min cycle-time retro focused on the 3 longest outlier tickets";
 
-      runHistory = [];
-      const base = Date.now() - snapshots.length * 3 * 24 * 60 * 60 * 1000;
-      snapshots.forEach((s, i) => {
-        const ts = new Date(base + i * 3 * 24 * 60 * 60 * 1000);
+      prevKpi = null;
+      demoSnapshots.forEach((snap, i) => {
         setTimeout(() => {
-          updateDashboard({ ...s, analysis: i < snapshots.length - 1 ? "" : analysis });
-          if (i === snapshots.length - 1) {
-            showBanner("Demo data loaded — 5 syncs simulated", true);
+          const isLast = i === demoSnapshots.length - 1;
+          updateDashboard({ ...snap.metrics, analysis: isLast ? analysis : "" });
+          if (isLast) {
+            updateDataAge(snap.timestamp);
+            drawChart(demoSnapshots);
+            drawThroughputChart(demoSnapshots);
+            showBanner("Demo data loaded — 5 snapshots simulated", true);
             lastRunStatusNode.textContent = "Demo mode — no real Jira connection";
           }
         }, i * 300);
@@ -1269,14 +1410,8 @@
     restoreState();
     renderTabs();
 
-    if (runHistory.length > 0) {
-      revealContent();
-      drawChart();
-      drawThroughputChart();
-    }
-
     connectButton.addEventListener("click", handleConnect);
-    runButton.addEventListener("click", runReport);
+    runButton.addEventListener("click", runSyncFlow);
 
     toggleTokenBtn.addEventListener("click", () => {
       const next = jiraTokenInput.type === "password" ? "text" : "password";
@@ -1305,7 +1440,7 @@
           b.classList.toggle("active", b === btn)
         );
         LS.saveState();
-        if (jiraConnected) runReport();
+        if (jiraConnected) loadHistory();
       });
     });
   </script>
