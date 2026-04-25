@@ -17,9 +17,10 @@ server.py (Python stdlib HTTP)
     │               (для всех задач)
     │
     ├── calculate_metrics(issues, cutoff)
-    │       ├── Cycle Time (последний started_at → resolved_at)
-    │       ├── Lead Time  (created_at → resolved_at)
-    │       ├── Throughput (кол-во resolved за период)
+    │       ├── Cycle Time        (последний started_at → resolved_at)
+    │       ├── Time to Market    (created_at → resolved_at)
+    │       ├── Flow Efficiency   (cycleTime / timeToMarket × 100, cap 100%)
+    │       ├── Throughput        (кол-во resolved за период)
     │       └── Backlog / WIP / Reopened counts (Reopened — только среди completed)
     │
     ├── call_openai()          [опционально]
@@ -62,8 +63,8 @@ Jira Raw Issue
             │
             ▼ (+ cutoff filter)
     Metrics dict
-            cycleTimeDays, leadTimeDays, throughput,
-            backlogSize, inProgressCount,
+            cycleTimeDays, timeToMarketDays, throughput,
+            flowEfficiencyPercent, backlogSize, inProgressCount,
             reopenedCount (только среди completed)
 ```
 

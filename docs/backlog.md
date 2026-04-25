@@ -29,6 +29,9 @@
 
 ## Готово ✅
 
+- [x] Flow Efficiency (5-я KPI-карточка, amber, ≥40%/≤15%), формула: cycleTime/timeToMarket×100, кап 100%
+- [x] Lead Time → Time to Market (переименование везде: server, JSON, Telegram, OpenAI, HTML, тесты)
+- [x] Throughput — убран / period label из карточки (период виден в picker'е)
 - [x] UX overhaul: KPI-акценты, collapsible sidebar, empty state, period bar, AI/Risks иерархия, favicon
 - [x] Автосинк при смене периода (без ручного нажатия Sync)
 - [x] Восстановление connected-состояния при обновлении страницы
