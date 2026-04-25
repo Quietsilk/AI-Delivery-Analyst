@@ -14,13 +14,12 @@ server.py (Python stdlib HTTP)
     │       │
     │       ├── POST /rest/api/3/search/jql   (пагинация, PAGE_SIZE=50)
     │       └── GET  /rest/api/3/issue/{key}/changelog
-    │               (только для resolved + in-progress задач)
+    │               (для всех задач)
     │
     ├── calculate_metrics(issues, cutoff)
     │       ├── Cycle Time (последний started_at → resolved_at)
     │       ├── Lead Time  (created_at → resolved_at)
     │       ├── Throughput (кол-во resolved за период)
-    │       ├── Done Rate  (resolved / total × 100%)
     │       └── Backlog / WIP / Reopened counts (Reopened — только среди completed)
     │
     ├── call_openai()          [опционально]
@@ -64,8 +63,8 @@ Jira Raw Issue
             ▼ (+ cutoff filter)
     Metrics dict
             cycleTimeDays, leadTimeDays, throughput,
-            doneRatePercent, backlogSize,
-            inProgressCount, reopenedCount (только среди completed)
+            backlogSize, inProgressCount,
+            reopenedCount (только среди completed)
 ```
 
 ---
@@ -98,6 +97,7 @@ Changelog запрашивается для **всех** задач. Это не
 | `ada:activeId` | ID активного проекта |
 | `ada:period` | Активный period-фильтр |
 | `ada:runHistory` | JSON: последние 30 синков (ts + cycleTimeDays + throughput) |
+| `ada:sidebarCollapsed` | Булево: состояние сайдбара |
 
 ---
 

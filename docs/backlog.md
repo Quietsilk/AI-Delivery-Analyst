@@ -29,6 +29,10 @@
 
 ## Готово ✅
 
+- [x] UX overhaul: KPI-акценты, collapsible sidebar, empty state, period bar, AI/Risks иерархия, favicon
+- [x] Автосинк при смене периода (без ручного нажатия Sync)
+- [x] Восстановление connected-состояния при обновлении страницы
+- [x] Подавление CSS-transition сайдбара при загрузке страницы (layout jerk)
 - [x] Jira pagination (PAGE_SIZE=50, isLast loop)
 - [x] Period-фильтр (7d/30d/90d/all), server-side cutoff
 - [x] Changelog fetch для всех задач (покрывает Done без resolutiondate и In Progress → Backlog)
