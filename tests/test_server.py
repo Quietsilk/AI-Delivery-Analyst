@@ -20,7 +20,7 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import server
+import server_app as server
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -339,7 +339,7 @@ class TestFetchJiraPagination(unittest.TestCase):
 
     def test_single_page(self):
         page = self._make_page(["T-1", "T-2"], is_last=True)
-        with patch("server.jira_request", return_value=page):
+        with patch("server_app.jira_request", return_value=page):
             result = server.fetch_jira("https://jira.test", "user@test.com", "token", "project = TEST")
         self.assertEqual(len(result["issues"]), 2)
 
@@ -353,14 +353,14 @@ class TestFetchJiraPagination(unittest.TestCase):
                 return page2
             return page1
 
-        with patch("server.jira_request", side_effect=side_effect):
+        with patch("server_app.jira_request", side_effect=side_effect):
             result = server.fetch_jira("https://jira.test", "user@test.com", "token", "project = TEST")
         self.assertEqual(len(result["issues"]), 60)
 
     def test_stops_when_page_smaller_than_page_size(self):
         # isLast=False but len(page) < PAGE_SIZE → stop without nextPageToken
         page = self._make_page(["T-1", "T-2"], is_last=False)
-        with patch("server.jira_request", return_value=page):
+        with patch("server_app.jira_request", return_value=page):
             result = server.fetch_jira("https://jira.test", "user@test.com", "token", "project = TEST")
         self.assertEqual(len(result["issues"]), 2)
 
@@ -427,7 +427,7 @@ class TestHttpIntegration(unittest.TestCase):
         ]
         mock_jira_response = {"issues": mock_issues}
 
-        with patch("server.fetch_jira", return_value=mock_jira_response), \
+        with patch("server_app.fetch_jira", return_value=mock_jira_response), \
              patch.dict(os.environ, {"OPENAI_API_KEY": "", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}):
             payload = json.dumps({
                 "baseUrl": "https://jira.test",
@@ -451,7 +451,7 @@ class TestHttpIntegration(unittest.TestCase):
         self.assertFalse(body["dashboard"]["aiEnabled"])
 
     def test_post_returns_500_on_jira_error(self):
-        with patch("server.fetch_jira", side_effect=Exception("Jira down")):
+        with patch("server_app.fetch_jira", side_effect=Exception("Jira down")):
             payload = json.dumps({
                 "baseUrl": "https://jira.test",
                 "email": "u", "apiToken": "t", "jql": "project = X",
@@ -490,7 +490,7 @@ class TestHttpIntegration(unittest.TestCase):
                 {"date": "2020-01-05T00:00:00Z", "from": "In Progress", "to": "Done"},
             ],
         )
-        with patch("server.fetch_jira", return_value={"issues": [old_issue]}), \
+        with patch("server_app.fetch_jira", return_value={"issues": [old_issue]}), \
              patch.dict(os.environ, {"OPENAI_API_KEY": "", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}):
             payload = json.dumps({
                 "baseUrl": "https://jira.test",
@@ -519,7 +519,7 @@ class TestHttpIntegration(unittest.TestCase):
                 ],
             )
         ]
-        with patch("server.fetch_jira", return_value={"issues": mock_issues}), \
+        with patch("server_app.fetch_jira", return_value={"issues": mock_issues}), \
              patch.dict(os.environ, {"OPENAI_API_KEY": "", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}):
             payload = json.dumps({
                 "baseUrl": "https://jira.test",
@@ -804,7 +804,7 @@ class TestHandleTelegramAndAI(unittest.TestCase):
 
     def _post(self, payload, env=None):
         env = env or {"OPENAI_API_KEY": "", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}
-        with patch("server.fetch_jira", return_value={"issues": payload}), \
+        with patch("server_app.fetch_jira", return_value={"issues": payload}), \
              patch.dict(os.environ, env):
             data = json.dumps({
                 "baseUrl": "https://jira.test", "email": "u",
@@ -830,8 +830,8 @@ class TestHandleTelegramAndAI(unittest.TestCase):
                 {"date": "2024-01-05T00:00:00Z", "from": "In Progress", "to": "Done"},
             ],
         )
-        with patch("server.fetch_jira", return_value={"issues": [done]}), \
-             patch("server.call_openai", return_value="Summary: good"), \
+        with patch("server_app.fetch_jira", return_value={"issues": [done]}), \
+             patch("server_app.call_openai", return_value="Summary: good"), \
              patch.dict(os.environ, {"OPENAI_API_KEY": "sk-real", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}):
             data = json.dumps({
                 "baseUrl": "https://jira.test", "email": "u",
@@ -847,8 +847,8 @@ class TestHandleTelegramAndAI(unittest.TestCase):
         self.assertIn("Summary", body["dashboard"]["analysis"])
 
     def test_ai_error_populated_on_openai_failure(self):
-        with patch("server.fetch_jira", return_value={"issues": []}), \
-             patch("server.call_openai", side_effect=RuntimeError("quota exceeded")), \
+        with patch("server_app.fetch_jira", return_value={"issues": []}), \
+             patch("server_app.call_openai", side_effect=RuntimeError("quota exceeded")), \
              patch.dict(os.environ, {"OPENAI_API_KEY": "sk-real", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}):
             data = json.dumps({
                 "baseUrl": "https://jira.test", "email": "u",
