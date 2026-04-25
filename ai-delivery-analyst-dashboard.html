@@ -812,9 +812,11 @@
     let sidebarCollapsed = false;
 
     // ── Sidebar collapse ──────────────────────────────────────
-    function applySidebarState() {
-      document.getElementById("app-body")
-        .classList.toggle("sidebar-collapsed", sidebarCollapsed);
+    function applySidebarState(animate = true) {
+      const appBody = document.getElementById("app-body");
+      if (!animate) appBody.style.transition = "none";
+      appBody.classList.toggle("sidebar-collapsed", sidebarCollapsed);
+      if (!animate) requestAnimationFrame(() => requestAnimationFrame(() => { appBody.style.transition = ""; }));
     }
 
     sidebarToggleBtn.addEventListener("click", () => {
@@ -883,7 +885,7 @@
       }
 
       sidebarCollapsed = LS.load("ada:sidebarCollapsed", false);
-      applySidebarState();
+      applySidebarState(false);
     }
 
     // ── Chip helpers ──────────────────────────────────────────
