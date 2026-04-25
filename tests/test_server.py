@@ -538,6 +538,345 @@ class TestHttpIntegration(unittest.TestCase):
         self.assertIn("reopenedCount", body["dashboard"])
 
 
+# ── call_openai ───────────────────────────────────────────────────────────────
+
+class TestCallOpenai(unittest.TestCase):
+    METRICS = {
+        "cycleTimeDays": 3.0, "leadTimeDays": 4.0, "throughput": 5,
+        "backlogSize": 2, "inProgressCount": 1, "reopenedCount": 0,
+    }
+
+    def _mock_response(self, payload, status=200):
+        resp = MagicMock()
+        resp.status = status
+        resp.read.return_value = json.dumps(payload).encode()
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        return resp
+
+    def test_returns_output_text(self):
+        resp = self._mock_response({"output_text": "Risks: X\nActions: Y"})
+        with patch("urllib.request.urlopen", return_value=resp):
+            result = server.call_openai(self.METRICS, "sk-test")
+        self.assertEqual(result, "Risks: X\nActions: Y")
+
+    def test_fallback_to_choices(self):
+        payload = {"choices": [{"message": {"content": "Fallback analysis"}}]}
+        resp = self._mock_response(payload)
+        with patch("urllib.request.urlopen", return_value=resp):
+            result = server.call_openai(self.METRICS, "sk-test")
+        self.assertEqual(result, "Fallback analysis")
+
+    def test_fallback_to_default_when_empty(self):
+        resp = self._mock_response({})
+        with patch("urllib.request.urlopen", return_value=resp):
+            result = server.call_openai(self.METRICS, "sk-test")
+        self.assertEqual(result, "AI analysis unavailable.")
+
+    def test_retries_on_429_then_succeeds(self):
+        err_429 = urllib.error.HTTPError(
+            url="", code=429, msg="Too Many Requests",
+            hdrs=MagicMock(**{"get.return_value": "1"}), fp=None,
+        )
+        err_429.read = lambda: json.dumps({}).encode()
+        err_429.headers = MagicMock(**{"get.return_value": "1"})
+        ok_resp = self._mock_response({"output_text": "OK"})
+
+        call_count = [0]
+        def side_effect(*a, **kw):
+            call_count[0] += 1
+            if call_count[0] < 2:
+                raise err_429
+            return ok_resp
+
+        with patch("urllib.request.urlopen", side_effect=side_effect), \
+             patch("time.sleep"):
+            result = server.call_openai(self.METRICS, "sk-test")
+        self.assertEqual(result, "OK")
+        self.assertEqual(call_count[0], 2)
+
+    def test_raises_on_insufficient_quota(self):
+        err_429 = urllib.error.HTTPError(
+            url="", code=429, msg="Too Many Requests",
+            hdrs=MagicMock(), fp=None,
+        )
+        err_429.read = lambda: json.dumps({"error": {"code": "insufficient_quota"}}).encode()
+        err_429.headers = MagicMock(**{"get.return_value": None})
+
+        with patch("urllib.request.urlopen", side_effect=err_429), \
+             patch("time.sleep"):
+            with self.assertRaises(RuntimeError) as ctx:
+                server.call_openai(self.METRICS, "sk-test")
+        self.assertIn("platform.openai.com/settings/billing", str(ctx.exception))
+
+    def test_raises_after_all_retries_exhausted(self):
+        err_429 = urllib.error.HTTPError(
+            url="", code=429, msg="Too Many Requests",
+            hdrs=MagicMock(), fp=None,
+        )
+        err_429.read = lambda: json.dumps({}).encode()
+        err_429.headers = MagicMock(**{"get.return_value": None})
+
+        with patch("urllib.request.urlopen", side_effect=err_429), \
+             patch("time.sleep"):
+            with self.assertRaises(urllib.error.HTTPError):
+                server.call_openai(self.METRICS, "sk-test")
+
+    def test_non_429_error_raises_immediately(self):
+        err_500 = urllib.error.HTTPError(
+            url="", code=500, msg="Internal Server Error",
+            hdrs=MagicMock(), fp=None,
+        )
+        call_count = [0]
+        def side_effect(*a, **kw):
+            call_count[0] += 1
+            raise err_500
+
+        with patch("urllib.request.urlopen", side_effect=side_effect), \
+             patch("time.sleep"):
+            with self.assertRaises(urllib.error.HTTPError):
+                server.call_openai(self.METRICS, "sk-test")
+        self.assertEqual(call_count[0], 1)  # no retry on 500
+
+    def test_prompt_includes_period_label(self):
+        captured = []
+        ok_resp = self._mock_response({"output_text": "ok"})
+        def side_effect(req, timeout=None):
+            captured.append(json.loads(req.data.decode())["input"])
+            return ok_resp
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            server.call_openai(self.METRICS, "sk-test", period_label="last 7 days")
+        self.assertIn("last 7 days", captured[0])
+
+
+# ── send_telegram ──────────────────────────────────────────────────────────────
+
+class TestSendTelegram(unittest.TestCase):
+    def _ok_resp(self):
+        resp = MagicMock()
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        return resp
+
+    def test_single_chunk_calls_urlopen_once(self):
+        with patch("urllib.request.urlopen", return_value=self._ok_resp()) as mock_open:
+            server.send_telegram("hello", "token123", "chat456")
+        self.assertEqual(mock_open.call_count, 1)
+
+    def test_multi_chunk_calls_urlopen_multiple_times(self):
+        text = ("word " * 1000).strip()  # > 4096 chars → 2 chunks
+        with patch("urllib.request.urlopen", return_value=self._ok_resp()) as mock_open:
+            server.send_telegram(text, "token", "chat")
+        self.assertGreater(mock_open.call_count, 1)
+
+    def test_error_on_first_chunk_stops_sending(self):
+        call_count = [0]
+        def side_effect(*a, **kw):
+            call_count[0] += 1
+            raise Exception("network error")
+
+        text = ("word " * 1000).strip()
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            server.send_telegram(text, "token", "chat")  # must not raise
+        self.assertEqual(call_count[0], 1)  # stopped after first failure
+
+    def test_sends_to_correct_bot_url(self):
+        captured = []
+        def side_effect(req, timeout=None):
+            captured.append(req.full_url)
+            return self._ok_resp()
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            server.send_telegram("hi", "mytoken", "99")
+        self.assertIn("/botmytoken/sendMessage", captured[0])
+
+    def test_payload_contains_chat_id_and_text(self):
+        captured = []
+        def side_effect(req, timeout=None):
+            captured.append(json.loads(req.data.decode()))
+            return self._ok_resp()
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            server.send_telegram("hello world", "tok", "42")
+        self.assertEqual(captured[0]["chat_id"], "42")
+        self.assertEqual(captured[0]["text"], "hello world")
+
+
+# ── calculate_metrics — additional edge cases ──────────────────────────────────
+
+class TestCalculateMetricsEdgeCases(unittest.TestCase):
+    def test_average_cycle_time_across_multiple_issues(self):
+        issues = [
+            make_issue(
+                key="T-1", status="Done",
+                created="2024-01-01T00:00:00Z",
+                resolutiondate="2024-01-03T00:00:00Z",
+                transitions=[
+                    {"date": "2024-01-01T00:00:00Z", "from": "To Do", "to": "In Progress"},
+                    {"date": "2024-01-03T00:00:00Z", "from": "In Progress", "to": "Done"},
+                ],
+            ),
+            make_issue(
+                key="T-2", status="Done",
+                created="2024-01-01T00:00:00Z",
+                resolutiondate="2024-01-05T00:00:00Z",
+                transitions=[
+                    {"date": "2024-01-01T00:00:00Z", "from": "To Do", "to": "In Progress"},
+                    {"date": "2024-01-05T00:00:00Z", "from": "In Progress", "to": "Done"},
+                ],
+            ),
+        ]
+        m = server.calculate_metrics(issues)
+        self.assertEqual(m["cycleTimeDays"], 3.0)  # avg(2, 4) = 3
+        self.assertEqual(m["throughput"], 2)
+
+    def test_negative_cycle_time_excluded_from_average(self):
+        # resolved_at < started_at (bad data) → excluded from avg
+        issue = make_issue(
+            status="Done",
+            created="2024-01-01T00:00:00Z",
+            resolutiondate="2024-01-02T00:00:00Z",
+            transitions=[
+                {"date": "2024-01-03T00:00:00Z", "from": "To Do", "to": "In Progress"},
+                {"date": "2024-01-02T00:00:00Z", "from": "In Progress", "to": "Done"},
+            ],
+        )
+        m = server.calculate_metrics([issue])
+        self.assertEqual(m["cycleTimeDays"], 0)  # negative → excluded → avg of empty = 0
+
+    def test_cutoff_does_not_affect_in_progress(self):
+        # Old WIP (started 2023) must still appear in inProgressCount
+        old_wip = make_issue(
+            status="In Progress",
+            created="2023-01-01T00:00:00Z",
+            transitions=[
+                {"date": "2023-06-01T00:00:00Z", "from": "To Do", "to": "In Progress"},
+            ],
+        )
+        cutoff = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        m = server.calculate_metrics([old_wip], cutoff=cutoff)
+        self.assertEqual(m["inProgressCount"], 1)
+        self.assertEqual(m["throughput"], 0)
+
+    def test_cutoff_does_not_affect_backlog(self):
+        old_backlog = make_issue(
+            status="To Do",
+            created="2023-01-01T00:00:00Z",
+        )
+        cutoff = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        m = server.calculate_metrics([old_backlog], cutoff=cutoff)
+        self.assertEqual(m["backlogSize"], 1)
+
+
+# ── _parse_dt — edge cases ─────────────────────────────────────────────────────
+
+class TestParseDtEdgeCases(unittest.TestCase):
+    def test_hhmm_offset_without_colon(self):
+        # Python 3.9 fromisoformat doesn't accept +0400, only +04:00
+        dt = server._parse_dt("2024-03-15T12:00:00+0400")
+        self.assertEqual(dt.hour, 12)
+
+    def test_negative_offset(self):
+        dt = server._parse_dt("2024-03-15T08:00:00-05:00")
+        self.assertEqual(dt.hour, 8)
+
+
+# ── _handle — Telegram icon and AI fields ─────────────────────────────────────
+
+class TestHandleTelegramAndAI(unittest.TestCase):
+    """Test _handle behaviour for Telegram icon logic and AI fields."""
+
+    @classmethod
+    def setUpClass(cls):
+        import http.server as hs
+        cls.srv = hs.HTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.port = cls.srv.server_address[1]
+        cls.thread = threading.Thread(target=cls.srv.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def _url(self, path=""):
+        return f"http://127.0.0.1:{self.port}{path}"
+
+    def _post(self, payload, env=None):
+        env = env or {"OPENAI_API_KEY": "", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}
+        with patch("server.fetch_jira", return_value={"issues": payload}), \
+             patch.dict(os.environ, env):
+            data = json.dumps({
+                "baseUrl": "https://jira.test", "email": "u",
+                "apiToken": "t", "jql": "project = X", "period": "all",
+            }).encode()
+            req = urllib.request.Request(
+                self._url("/webhook/sync-report"),
+                data=data, headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with urllib.request.urlopen(req) as r:
+                return json.loads(r.read())
+
+    def test_ai_enabled_false_when_no_key(self):
+        body = self._post([])
+        self.assertFalse(body["dashboard"]["aiEnabled"])
+
+    def test_ai_enabled_true_and_analysis_present_when_key_set(self):
+        done = make_issue(
+            status="Done", created="2024-01-01T00:00:00Z",
+            resolutiondate="2024-01-05T00:00:00Z",
+            transitions=[
+                {"date": "2024-01-02T00:00:00Z", "from": "To Do", "to": "In Progress"},
+                {"date": "2024-01-05T00:00:00Z", "from": "In Progress", "to": "Done"},
+            ],
+        )
+        with patch("server.fetch_jira", return_value={"issues": [done]}), \
+             patch("server.call_openai", return_value="Summary: good"), \
+             patch.dict(os.environ, {"OPENAI_API_KEY": "sk-real", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}):
+            data = json.dumps({
+                "baseUrl": "https://jira.test", "email": "u",
+                "apiToken": "t", "jql": "project = X", "period": "all",
+            }).encode()
+            req = urllib.request.Request(
+                self._url("/webhook/sync-report"),
+                data=data, headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with urllib.request.urlopen(req) as r:
+                body = json.loads(r.read())
+        self.assertTrue(body["dashboard"]["aiEnabled"])
+        self.assertIn("Summary", body["dashboard"]["analysis"])
+
+    def test_ai_error_populated_on_openai_failure(self):
+        with patch("server.fetch_jira", return_value={"issues": []}), \
+             patch("server.call_openai", side_effect=RuntimeError("quota exceeded")), \
+             patch.dict(os.environ, {"OPENAI_API_KEY": "sk-real", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""}):
+            data = json.dumps({
+                "baseUrl": "https://jira.test", "email": "u",
+                "apiToken": "t", "jql": "project = X", "period": "all",
+            }).encode()
+            req = urllib.request.Request(
+                self._url("/webhook/sync-report"),
+                data=data, headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with urllib.request.urlopen(req) as r:
+                body = json.loads(r.read())
+        self.assertTrue(body["ok"])
+        self.assertIn("quota exceeded", body["dashboard"]["aiError"])
+        self.assertEqual(body["dashboard"]["analysis"], "")
+
+    def test_throughput_period_label_all(self):
+        body = self._post([])
+        self.assertEqual(body["dashboard"]["throughputPeriodLabel"], "all")
+
+    def test_dashboard_response_shape(self):
+        body = self._post([])
+        expected_keys = {"cycleTimeDays", "throughput", "throughputPeriodLabel",
+                         "leadTimeDays", "reopenedCount", "analysis", "aiEnabled", "aiError"}
+        self.assertEqual(set(body["dashboard"].keys()), expected_keys)
+        self.assertNotIn("doneRatePercent", body["dashboard"])
+        self.assertNotIn("completedCount", body["dashboard"])
+
+
 # ── load_env ───────────────────────────────────────────────────────────────────
 
 class TestLoadEnv(unittest.TestCase):

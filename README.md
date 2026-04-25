@@ -64,7 +64,7 @@ ai-delivery-analyst/
 ├── ai-delivery-analyst-dashboard.html # UI (single file)
 ├── start.sh                           # Launch wrapper
 ├── tests/
-│   └── test_server.py                 # 37 regression tests (stdlib unittest)
+│   └── test_server.py                 # 61 regression tests (stdlib unittest)
 ├── docs/
 │   ├── architecture.md
 │   ├── backlog.md
@@ -148,15 +148,17 @@ The server uses the new `/rest/api/3/search/jql` endpoint (Jira Cloud):
 python3 -m unittest tests/test_server.py -v
 ```
 
-37 tests, zero external dependencies. Coverage:
+61 tests, zero external dependencies. Coverage:
 
 | Group | Tests |
 |---|---|
-| `calculate_metrics` — empty, completed, WIP, backlog, cutoff, reopened, cycle/lead time, BUG-1/2/3 | 14 |
+| `calculate_metrics` — empty, completed, WIP, backlog, cutoff, reopened, cycle/lead time, BUG-1/2/3, avg, negative cycle | 18 |
+| `call_openai` — output_text, choices fallback, retry 429, insufficient_quota, all retries exhausted, non-429 no retry, period_label | 8 |
+| `send_telegram` — single chunk, multi-chunk, error stops send, bot URL, payload shape | 5 |
 | `_split_telegram` — short text, newline/space split, hard cut, empty chunks | 7 |
 | `fetch_jira` — single page, cursor pagination, stop on small page | 3 |
-| HTTP integration — GET, 404, CORS, POST pipeline, 500 on Jira error, period=7d, throughputPeriodLabel | 8 |
-| `_parse_dt` — Z, +00:00, +HH:MM formats | 3 |
+| HTTP integration — GET, 404, CORS, POST pipeline, 500, period=7d, throughputPeriodLabel, aiEnabled, aiError, response shape | 13 |
+| `_parse_dt` — Z, +00:00, +HH:MM, HHMM without colon, negative offset | 5 |
 | `load_env` — file load, missing file | 2 |
 
 ---

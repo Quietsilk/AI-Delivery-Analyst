@@ -40,7 +40,7 @@
 - [x] localStorage-персистентность (credentials, projects, history, period)
 - [x] Smart Telegram chunking (split по \n / пробел / hard cut)
 - [x] aiEnabled флаг в ответе (честный placeholder при отсутствии ключа)
-- [x] Regression suite: 37 тестов, stdlib unittest, zero deps
+- [x] Regression suite: 61 тест, stdlib unittest, zero deps (добавлены call_openai, send_telegram, edge cases)
 - [x] Архитектурный pivot: TypeScript → Python
 - [x] Переименование Predictability → Done Rate (корректное определение метрики)
 - [x] Throughput с меткой периода (15 / 30d) в UI и Telegram
